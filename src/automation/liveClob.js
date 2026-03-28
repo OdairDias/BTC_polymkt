@@ -56,7 +56,8 @@ export async function getOrCreateClobClient() {
       const signer = walletToClobSigner(wallet);
       const host = CONFIG.clobBaseUrl.replace(/\/$/, "");
       const chainId = CONFIG.live.chainId;
-      const temp = new ClobClient(host, chainId, signer);
+      // Mesmo useServerTime que no cliente final: L1 (derivar API key) e L2 alinham ao relógio do CLOB.
+      const temp = new ClobClient(host, chainId, signer, undefined, undefined, undefined, undefined, true);
       const creds = await temp.createOrDeriveApiKey();
       const funderRaw = (CONFIG.live.funderAddress || "").trim();
       let funderNorm;
