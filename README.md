@@ -116,7 +116,7 @@ Opcional: gravar **uma decisão simulada por mercado** quando o relógio **entra
 
 ### Conta real no CLOB (preparação)
 
-Usa [`@polymarket/clob-client`](https://www.npmjs.com/package/@polymarket/clob-client): ordem **BUY limit FOK** no token UP ou DOWN, preço ≈ buy do snapshot, tamanho = `notional / preço` (mesma lógica do paper).
+Usa [`@polymarket/clob-client`](https://www.npmjs.com/package/@polymarket/clob-client): ordem **BUY mercado FOK** (`createAndPostMarketOrder`) — gasta até **`STRATEGY_NOTIONAL_USD`** em USDC com teto de preço = buy do snapshot (tick), alinhado à validação CLOB de “market buy”.
 
 **Checklist antes de ligar:**
 

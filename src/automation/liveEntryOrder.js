@@ -20,35 +20,21 @@ function roundDownDecimals(n, places) {
 }
 
 /**
- * O CLOB rejeita BUY FOK com "invalid amounts" se maker/taker tiverem precisão a mais.
- * O `@polymarket/clob-client` aplica `roundDown(size, 2)` em todos os ticks (ROUNDING_CONFIG);
- * se enviarmos 4 decimais no size, o SDK altera o size e o produto price×size ganha ruído float.
- * Por isso alinhamos **preço ao tick**, **shares a 2 decimais** e **USDC (maker) a 2 decimais**, com `.toFixed` para evitar binários.
+ * Preço máximo (tick) + USDC a gastar (2 dec), para `createAndPostMarketOrder`.
+ * A API trata FOK como "market buy" e valida maker/taker com a rota de mercado —
+ * ordem **limite** + FOK gerava "invalid amounts" mesmo com arredondamento.
  */
-export function quantizeBuyLimitForClob(price, sizeShares, tickSizeStr) {
+function capPriceAndAmountUsd(limitPrice, notionalUsd, tickSizeStr) {
   const tickDec = decimalsFromTickString(tickSizeStr);
-  const p = Number(roundDownDecimals(Number(price), tickDec).toFixed(tickDec));
-  if (!Number.isFinite(p) || p <= 0) {
-    throw new Error(`preço inválido após tick (${tickSizeStr})`);
+  const capPrice = Number(roundDownDecimals(Number(limitPrice), tickDec).toFixed(tickDec));
+  if (!Number.isFinite(capPrice) || capPrice <= 0) {
+    throw new Error(`preço limite inválido após tick (${tickSizeStr})`);
   }
-
-  let s = Number(roundDownDecimals(Number(sizeShares), 2).toFixed(2));
-  if (!Number.isFinite(s) || s <= 0) {
-    throw new Error("size inválido após 2 decimais (alinhado ao clob-client)");
+  const amountUsd = Number(roundDownDecimals(Number(notionalUsd), 2).toFixed(2));
+  if (amountUsd < 0.01) {
+    throw new Error("STRATEGY_NOTIONAL_USD < 0.01 após arredondar");
   }
-
-  let makerUsd = Number(roundDownDecimals(s * p, 2).toFixed(2));
-  if (makerUsd < 0.01) {
-    throw new Error("USDC maker < 0.01 após arredondar — aumenta STRATEGY_NOTIONAL_USD");
-  }
-
-  s = Number(roundDownDecimals(makerUsd / p, 2).toFixed(2));
-  makerUsd = Number(roundDownDecimals(s * p, 2).toFixed(2));
-
-  if (!Number.isFinite(s) || s <= 0 || makerUsd < 0.01) {
-    throw new Error("size/maker zero após alinhar USDC (2 dec) e shares (2 dec)");
-  }
-  return { price: p, size: s, makerUsd };
+  return { capPrice, amountUsd };
 }
 
 function extractOrderMeta(result) {
@@ -79,7 +65,8 @@ function extractOrderMeta(result) {
 }
 
 /**
- * Envia ordem limite BUY FOK no CLOB após entrada da estratégia.
+ * Envia BUY **mercado** FOK no CLOB (~`notionalUsd` USDC, teto = preço do paper),
+ * via `createAndPostMarketOrder` (montantes alinhados à validação "market buy").
  * Grava linha em strategy_live_orders (sucesso ou erro).
  */
 export async function tryPlaceLiveEntryOrder({
@@ -106,22 +93,23 @@ export async function tryPlaceLiveEntryOrder({
     const tickSize = await clob.getTickSize(String(tokenId));
     const negRisk = await clob.getNegRisk(String(tokenId));
 
-    const size0 = Number(sizeShares);
     const price0 = Number(limitPrice);
-    if (!Number.isFinite(size0) || size0 <= 0 || !Number.isFinite(price0) || price0 <= 0) {
-      throw new Error("size ou price inválidos para CLOB");
+    const notional = Number(notionalUsd);
+    if (!Number.isFinite(price0) || price0 <= 0 || !Number.isFinite(notional) || notional <= 0) {
+      throw new Error("limitPrice ou notionalUsd inválidos para CLOB");
     }
 
-    const { price, size } = quantizeBuyLimitForClob(price0, size0, tickSize);
-    rowBase.limit_price = price;
-    rowBase.size_shares = size;
+    const { capPrice, amountUsd } = capPriceAndAmountUsd(price0, notional, tickSize);
+    rowBase.limit_price = capPrice;
+    rowBase.size_shares = Number(roundDownDecimals(amountUsd / capPrice, 2).toFixed(2));
 
-    const result = await clob.createAndPostOrder(
+    const result = await clob.createAndPostMarketOrder(
       {
         tokenID: String(tokenId),
-        price,
-        size,
-        side: Side.BUY
+        side: Side.BUY,
+        amount: amountUsd,
+        price: capPrice,
+        orderType: OrderType.FOK
       },
       { tickSize, negRisk },
       OrderType.FOK
@@ -145,7 +133,7 @@ export async function tryPlaceLiveEntryOrder({
 
     return {
       ok: true,
-      line: `CLOB FOK ok · order ${orderId ?? "(sem id na resposta)"}${statusHint}`
+      line: `CLOB mercado FOK ok · order ${orderId ?? "(sem id na resposta)"}${statusHint}`
     };
   } catch (err) {
     const msg = err?.message ?? String(err);
