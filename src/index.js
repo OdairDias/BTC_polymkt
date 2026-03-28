@@ -409,6 +409,15 @@ async function fetchPolymarketSnapshot() {
 }
 
 async function main() {
+  if (CONFIG.strategy.enabled) {
+    const pk = (CONFIG.live.privateKey || "").trim();
+    console.log(
+      `[strategy] dryRun=${CONFIG.strategy.dryRun} liveArmed=${CONFIG.strategy.liveArmed} ` +
+        `privateKey=${pk ? "set" : "missing"} notionalUsd=${CONFIG.strategy.notionalUsd} ` +
+        `databaseUrl=${CONFIG.strategy.databaseUrl ? "set" : "missing"}`
+    );
+  }
+
   const binanceStream = startBinanceTradeStream({ symbol: CONFIG.symbol });
   const polymarketLiveStream = startPolymarketChainlinkPriceStream({});
   const chainlinkStream = startChainlinkPriceStream({});

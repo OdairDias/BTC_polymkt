@@ -59,13 +59,21 @@ export async function getOrCreateClobClient() {
       const temp = new ClobClient(host, chainId, signer);
       const creds = await temp.createOrDeriveApiKey();
       const funder = (CONFIG.live.funderAddress || "").trim();
+      // throwOnError=true: respostas com campo `error` passam a lançar (evita “sucesso” falso).
       return new ClobClient(
         host,
         chainId,
         signer,
         creds,
         CONFIG.live.signatureType,
-        funder || undefined
+        funder || undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        true
       );
     })();
   }

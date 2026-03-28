@@ -3,13 +3,31 @@ import { CONFIG } from "../config.js";
 import { getOrCreateClobClient } from "./liveClob.js";
 import { insertLiveOrder } from "../db/postgresStrategy.js";
 
-function extractOrderId(result) {
-  if (result == null) return null;
-  if (typeof result === "string") return result;
-  if (typeof result === "object") {
-    return result.orderID ?? result.orderId ?? result.id ?? result.order_id ?? null;
+function extractOrderMeta(result) {
+  if (result == null) {
+    return { orderId: null, status: null, errorMsg: "resposta vazia" };
   }
-  return null;
+  if (typeof result === "string") {
+    return { orderId: result, status: null, errorMsg: null };
+  }
+  if (typeof result !== "object") {
+    return { orderId: null, status: null, errorMsg: String(result) };
+  }
+  const errMsg = result.errorMsg != null ? String(result.errorMsg).trim() : "";
+  if (result.success === false || errMsg) {
+    return {
+      orderId: null,
+      status: result.status ?? null,
+      errorMsg: errMsg || "success=false"
+    };
+  }
+  const orderId =
+    result.orderID ??
+    result.orderId ??
+    result.order_id ??
+    result.id ??
+    null;
+  return { orderId, status: result.status ?? null, errorMsg: null };
 }
 
 /**
@@ -57,7 +75,13 @@ export async function tryPlaceLiveEntryOrder({
       OrderType.FOK
     );
 
-    const orderId = extractOrderId(result);
+    const meta = extractOrderMeta(result);
+    if (meta.errorMsg) {
+      throw new Error(meta.errorMsg);
+    }
+
+    const orderId = meta.orderId;
+    const statusHint = meta.status ? ` · status ${meta.status}` : "";
 
     await insertLiveOrder(pgClient, {
       ...rowBase,
@@ -69,7 +93,7 @@ export async function tryPlaceLiveEntryOrder({
 
     return {
       ok: true,
-      line: `CLOB FOK enviada · order ${orderId ?? "?"}`
+      line: `CLOB FOK ok · order ${orderId ?? "(sem id na resposta)"}${statusHint}`
     };
   } catch (err) {
     const msg = err?.message ?? String(err);
