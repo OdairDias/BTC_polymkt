@@ -12,7 +12,7 @@ It combines:
 
 ## Requirements
 
-- Node.js **18+** (https://nodejs.org/en)
+- Node.js **20.10+** (exigido por `@polymarket/clob-client`; https://nodejs.org)
 - npm (comes with Node)
 
 
@@ -99,9 +99,10 @@ Notes:
 
 Opcional: gravar **uma decisão simulada por mercado** quando o relógio **entra** na última janela de N minutos antes do `endDate` (padrão **2 min**). Compara **mid** do book UP vs DOWN (`(bid+ask)/2`, ou fallback no preço buy); o maior vence; empate (dentro de `STRATEGY_PRICE_EPSILON`) → `SKIP_TIE`. Notional padrão **US$ 1** simulado.
 
-- `STRATEGY_ENABLED` (default: `false`) — ligue com `true` para ativar.
+- `STRATEGY_ENABLED` (default no código: `true`) — desligue com `false` se não quiser estratégia/DB.
 - `DATABASE_URL` — connection string Postgres (ex.: Railway **Variables** → plugin Postgres).
-- `STRATEGY_DRY_RUN` (default: `true`) — mantém só simulação; `false` reservado para futura ordem real.
+- `STRATEGY_DRY_RUN` (default: `true`) — `false` grava `dry_run=false` na entrada e **habilita** envio CLOB se `STRATEGY_LIVE_ARMED=true`.
+- `STRATEGY_LIVE_ARMED` (default: `false`) — **tem de ser `true`** para enviar ordem real (além de `STRATEGY_DRY_RUN=false` e `POLYMARKET_PRIVATE_KEY`).
 - `STRATEGY_ENTRY_MINUTES_LEFT` (default: `2`) — janela: `0 < tempo_restante_min <= N`.
 - `STRATEGY_PRICE_EPSILON` (default: `0.001`) — empate se `|up_mid - down_mid| <= epsilon`.
 - `STRATEGY_NOTIONAL_USD` (default: `1`).
@@ -111,8 +112,22 @@ Opcional: gravar **uma decisão simulada por mercado** quando o relógio **entra
 
 1. **`strategy_paper_signals`** — entrada paper (uma linha por `market_slug`).
 2. **`strategy_paper_outcomes`** — resultado inferido pelos **mids UP/DOWN** nessa janela final; liga em `entry_id`; calcula `entry_correct` e `pnl_simulated_usd` quando houve lado UP/DOWN na entrada.
+3. **`strategy_live_orders`** — tentativa de ordem **real** no CLOB (uma por `entry_id`): `status` `SUBMITTED` ou `ERROR`, `clob_order_id`, `raw_response`.
 
-**Railway:** crie um serviço Postgres, copie `DATABASE_URL` para o app, defina `STRATEGY_ENABLED=true`, `npm start` como comando.
+### Conta real no CLOB (preparação)
+
+Usa [`@polymarket/clob-client`](https://www.npmjs.com/package/@polymarket/clob-client): ordem **BUY limit FOK** no token UP ou DOWN, preço ≈ buy do snapshot, tamanho = `notional / preço` (mesma lógica do paper).
+
+**Checklist antes de ligar:**
+
+1. Carteira com **USDC na Polygon** e **allowances** para contratos Polymarket (como no site ao negociar).
+2. `POLYMARKET_PRIVATE_KEY` — chave da carteira **EOA** (nunca commitar). Se usas proxy Polymarket, ajusta `POLYMARKET_SIGNATURE_TYPE` (`0` EOA, `1` proxy, `2` Gnosis Safe) e opcionalmente `POLYMARKET_FUNDER_ADDRESS`.
+3. `STRATEGY_DRY_RUN=false` **e** `STRATEGY_LIVE_ARMED=true` — as duas; sem isso **não** envia ordem.
+4. Railway: **Node 20+** no serviço (`engines` no `package.json`).
+
+Documentação oficial: [CLOB — Create order](https://docs.polymarket.com/developers/CLOB/orders/create-order), [Authentication](https://docs.polymarket.com/developers/CLOB/authentication).
+
+**Railway:** crie um serviço Postgres, copie `DATABASE_URL` para o app, `npm start` como comando.
 
 ### Descobrir `series_id` e slug para outro timeframe (ex.: 5m → 15m)
 

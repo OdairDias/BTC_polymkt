@@ -669,10 +669,12 @@ async function main() {
         : ANSI.reset;
 
       let strategyStatusLine = null;
+      let liveOrderStatusLine = null;
       let outcomeStatusLine = null;
       if (CONFIG.strategy.enabled) {
         const st = await runPaperStrategyTick({ poly, settlementLeftMin });
         if (st?.line) strategyStatusLine = st.line;
+        if (st?.liveOrderLine) liveOrderStatusLine = st.liveOrderLine;
         const ot = await runPaperOutcomeTick({ poly, settlementLeftMin });
         if (ot?.line) outcomeStatusLine = ot.line;
       }
@@ -682,6 +684,7 @@ async function main() {
         marketLine,
         kv("Time left:", `${timeColor}${fmtTimeLeft(timeLeftMin)}${ANSI.reset}`),
         strategyStatusLine ? `${padLabel("Paper strategy:", LABEL_W)}${strategyStatusLine}` : null,
+        liveOrderStatusLine ? `${padLabel("Live CLOB:", LABEL_W)}${liveOrderStatusLine}` : null,
         outcomeStatusLine ? `${padLabel("Paper outcome:", LABEL_W)}${outcomeStatusLine}` : null,
         "",
         sepLine(),

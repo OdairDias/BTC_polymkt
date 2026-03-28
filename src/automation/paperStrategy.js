@@ -3,6 +3,8 @@ import { midFromBook } from "../strategy/pricing.js";
 import { decideLateWindowSide } from "../strategy/lateWindow.js";
 import { getStrategyPool, ensureStrategySchemaOnce, insertPaperSignal, resetStrategySchemaFlag } from "../db/postgresStrategy.js";
 import { resetOutcomeTrailForTests } from "./paperOutcome.js";
+import { resetLiveClobClient } from "./liveClob.js";
+import { tryPlaceLiveEntryOrder, shouldAttemptLiveOrder } from "./liveEntryOrder.js";
 
 const ANSI_GREEN = "\x1b[32m";
 const ANSI_YELLOW = "\x1b[33m";
@@ -18,6 +20,7 @@ const slugMinutesLeftTrail = new Map();
 export function resetStrategyDbStateForTests() {
   resetStrategySchemaFlag();
   resetOutcomeTrailForTests();
+  resetLiveClobClient();
   warnedNoDb = false;
   slugMinutesLeftTrail.clear();
 }
@@ -113,7 +116,7 @@ export async function runPaperStrategyTick({ poly, settlementLeftMin }) {
     const endDate = poly.market.endDate ? new Date(poly.market.endDate) : null;
     const marketEndAt = endDate && !Number.isNaN(endDate.getTime()) ? endDate.toISOString() : null;
 
-    const { inserted } = await insertPaperSignal(client, {
+    const insertResult = await insertPaperSignal(client, {
       market_slug: marketSlug,
       condition_id:
         poly.market.conditionId != null
@@ -139,8 +142,35 @@ export async function runPaperStrategyTick({ poly, settlementLeftMin }) {
       dry_run: s.dryRun
     });
 
-    if (!inserted) {
+    if (!insertResult.inserted) {
       return { line: null, inserted: false };
+    }
+
+    let liveOrderLine = null;
+    if (
+      shouldAttemptLiveOrder() &&
+      (decision.side === "UP" || decision.side === "DOWN") &&
+      entryPrice != null &&
+      simulatedShares != null
+    ) {
+      const tokenId =
+        decision.side === "UP" ? poly.tokens?.upTokenId : poly.tokens?.downTokenId;
+      if (tokenId) {
+        const live = await tryPlaceLiveEntryOrder({
+          pgClient: client,
+          entryId: insertResult.id,
+          marketSlug,
+          tokenId: String(tokenId),
+          limitPrice: entryPrice,
+          sizeShares: Number(Number(simulatedShares).toFixed(6)),
+          notionalUsd: s.notionalUsd
+        });
+        liveOrderLine = live?.line
+          ? `${live.ok ? ANSI_GREEN : ANSI_RED}${live.line}${ANSI_RESET}`
+          : null;
+      } else {
+        liveOrderLine = `${ANSI_RED}CLOB: tokenId ausente${ANSI_RESET}`;
+      }
     }
 
     const tag = s.dryRun ? "DRY" : "LIVE";
@@ -148,12 +178,14 @@ export async function runPaperStrategyTick({ poly, settlementLeftMin }) {
       const px = entryPrice != null ? entryPrice.toFixed(3) : "?";
       return {
         inserted: true,
-        line: `${ANSI_GREEN}Paper ${tag}: ${decision.side} @~${px} ($${s.notionalUsd})${ANSI_RESET}`
+        line: `${ANSI_GREEN}Paper ${tag}: ${decision.side} @~${px} ($${s.notionalUsd})${ANSI_RESET}`,
+        liveOrderLine
       };
     }
     return {
       inserted: true,
-      line: `${ANSI_GRAY}Paper ${tag}: ${decision.result} (UP ${upMid?.toFixed?.(3) ?? "-"} vs DOWN ${downMid?.toFixed?.(3) ?? "-"})${ANSI_RESET}`
+      line: `${ANSI_GRAY}Paper ${tag}: ${decision.result} (UP ${upMid?.toFixed?.(3) ?? "-"} vs DOWN ${downMid?.toFixed?.(3) ?? "-"})${ANSI_RESET}`,
+      liveOrderLine
     };
   } catch (e) {
     return { line: `${ANSI_RED}Strategy DB: ${e?.message ?? e}${ANSI_RESET}`, error: String(e?.message ?? e) };

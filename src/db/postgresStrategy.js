@@ -76,6 +76,25 @@ export async function ensureStrategySchema(client) {
       ON strategy_paper_outcomes (market_slug);
     CREATE INDEX IF NOT EXISTS idx_strategy_paper_outcomes_created
       ON strategy_paper_outcomes (created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS strategy_live_orders (
+      id BIGSERIAL PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      entry_id BIGINT NOT NULL REFERENCES strategy_paper_signals(id) ON DELETE CASCADE,
+      market_slug TEXT NOT NULL,
+      token_id TEXT NOT NULL,
+      side TEXT NOT NULL,
+      limit_price NUMERIC,
+      size_shares NUMERIC,
+      notional_usd NUMERIC,
+      clob_order_id TEXT,
+      status TEXT NOT NULL,
+      error_message TEXT,
+      raw_response JSONB,
+      UNIQUE(entry_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_strategy_live_orders_created
+      ON strategy_live_orders (created_at DESC);
   `);
 }
 
@@ -136,6 +155,29 @@ export async function insertPaperSignal(client, row) {
     return { inserted: true, id: res.rows[0].id };
   }
   return { inserted: false };
+}
+
+export async function insertLiveOrder(client, row) {
+  await client.query(
+    `INSERT INTO strategy_live_orders (
+      entry_id, market_slug, token_id, side, limit_price, size_shares, notional_usd,
+      clob_order_id, status, error_message, raw_response
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+    ON CONFLICT (entry_id) DO NOTHING`,
+    [
+      row.entry_id,
+      row.market_slug,
+      row.token_id,
+      row.side,
+      row.limit_price ?? null,
+      row.size_shares ?? null,
+      row.notional_usd ?? null,
+      row.clob_order_id ?? null,
+      row.status,
+      row.error_message ?? null,
+      row.raw_response != null ? JSON.stringify(row.raw_response) : null
+    ]
+  );
 }
 
 export async function findPaperEntryBySlug(client, marketSlug) {

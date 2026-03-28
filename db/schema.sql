@@ -52,3 +52,24 @@ CREATE INDEX IF NOT EXISTS idx_strategy_paper_outcomes_slug
   ON strategy_paper_outcomes (market_slug);
 CREATE INDEX IF NOT EXISTS idx_strategy_paper_outcomes_created
   ON strategy_paper_outcomes (created_at DESC);
+
+-- Ordem CLOB real (uma por entrada), opcional
+CREATE TABLE IF NOT EXISTS strategy_live_orders (
+  id BIGSERIAL PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  entry_id BIGINT NOT NULL REFERENCES strategy_paper_signals(id) ON DELETE CASCADE,
+  market_slug TEXT NOT NULL,
+  token_id TEXT NOT NULL,
+  side TEXT NOT NULL,
+  limit_price NUMERIC,
+  size_shares NUMERIC,
+  notional_usd NUMERIC,
+  clob_order_id TEXT,
+  status TEXT NOT NULL,
+  error_message TEXT,
+  raw_response JSONB,
+  UNIQUE(entry_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_strategy_live_orders_created
+  ON strategy_live_orders (created_at DESC);

@@ -29,10 +29,19 @@ const DEFAULTS = {
   strategy: {
     enabled: true,
     dryRun: true,
+    liveArmed: false,
     entryMinutesLeft: 2,
     priceEpsilon: 0.001,
     notionalUsd: 1,
     outcomeLastSeconds: 5
+  },
+
+  /** Execução CLOB (conta real). Chaves só via env — nunca no código. */
+  live: {
+    privateKey: "",
+    chainId: 137,
+    signatureType: 0,
+    funderAddress: ""
   }
 };
 
@@ -103,6 +112,7 @@ export const CONFIG = {
   strategy: {
     enabled: envBool("STRATEGY_ENABLED", DEFAULTS.strategy.enabled),
     dryRun: envBoolNeg("STRATEGY_DRY_RUN", DEFAULTS.strategy.dryRun),
+    liveArmed: envBool("STRATEGY_LIVE_ARMED", DEFAULTS.strategy.liveArmed),
     databaseUrl: process.env.DATABASE_URL || "",
     entryMinutesLeft: Math.max(
       0.05,
@@ -114,5 +124,16 @@ export const CONFIG = {
       1,
       Number(process.env.STRATEGY_OUTCOME_LAST_SECONDS) || DEFAULTS.strategy.outcomeLastSeconds
     )
+  },
+
+  live: {
+    privateKey: envString("POLYMARKET_PRIVATE_KEY", DEFAULTS.live.privateKey),
+    chainId: Number.isFinite(Number(process.env.POLYMARKET_CHAIN_ID))
+      ? Number(process.env.POLYMARKET_CHAIN_ID)
+      : DEFAULTS.live.chainId,
+    signatureType: Number.isFinite(Number(process.env.POLYMARKET_SIGNATURE_TYPE))
+      ? Number(process.env.POLYMARKET_SIGNATURE_TYPE)
+      : DEFAULTS.live.signatureType,
+    funderAddress: envString("POLYMARKET_FUNDER_ADDRESS", DEFAULTS.live.funderAddress)
   }
 };
