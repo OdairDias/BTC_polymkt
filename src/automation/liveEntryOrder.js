@@ -3,6 +3,47 @@ import { CONFIG } from "../config.js";
 import { getOrCreateClobClient } from "./liveClob.js";
 import { insertLiveOrder } from "../db/postgresStrategy.js";
 
+/** Casas decimais da parte fracionária do tick (ex.: "0.01" → 2). */
+function decimalsFromTickString(tickSize) {
+  const s = String(tickSize).trim();
+  const i = s.indexOf(".");
+  if (i < 0) return 0;
+  const frac = s.slice(i + 1).replace(/0+$/, "");
+  return frac.length;
+}
+
+function roundDownDecimals(n, places) {
+  if (!Number.isFinite(n)) return n;
+  if (places <= 0) return Math.floor(n + 1e-12);
+  const f = 10 ** places;
+  return Math.floor((n + 1e-12) * f) / f;
+}
+
+/**
+ * O CLOB rejeita BUY FOK se os montantes humanos violarem:
+ * maker (USDC) ≤ 2 decimais, taker (shares) ≤ 4 decimais (mensagem "invalid amounts").
+ */
+export function quantizeBuyLimitForClob(price, sizeShares, tickSizeStr) {
+  const tickDec = decimalsFromTickString(tickSizeStr);
+  const p = roundDownDecimals(Number(price), tickDec);
+  if (!Number.isFinite(p) || p <= 0) {
+    throw new Error(`preço inválido após tick (${tickSizeStr})`);
+  }
+  let s = roundDownDecimals(Number(sizeShares), 4);
+  if (!Number.isFinite(s) || s <= 0) {
+    throw new Error("size inválido após 4 decimais");
+  }
+  let makerUsd = roundDownDecimals(s * p, 2);
+  if (makerUsd < 0.01) {
+    throw new Error("USDC maker < 0.01 após arredondar — aumenta STRATEGY_NOTIONAL_USD");
+  }
+  s = roundDownDecimals(makerUsd / p, 4);
+  if (!Number.isFinite(s) || s <= 0) {
+    throw new Error("size zero após alinhar maker USDC (2 dec)");
+  }
+  return { price: p, size: s, makerUsd };
+}
+
 function extractOrderMeta(result) {
   if (result == null) {
     return { orderId: null, status: null, errorMsg: "resposta vazia" };
@@ -58,11 +99,15 @@ export async function tryPlaceLiveEntryOrder({
     const tickSize = await clob.getTickSize(String(tokenId));
     const negRisk = await clob.getNegRisk(String(tokenId));
 
-    const size = Number(sizeShares);
-    const price = Number(limitPrice);
-    if (!Number.isFinite(size) || size <= 0 || !Number.isFinite(price) || price <= 0) {
+    const size0 = Number(sizeShares);
+    const price0 = Number(limitPrice);
+    if (!Number.isFinite(size0) || size0 <= 0 || !Number.isFinite(price0) || price0 <= 0) {
       throw new Error("size ou price inválidos para CLOB");
     }
+
+    const { price, size } = quantizeBuyLimitForClob(price0, size0, tickSize);
+    rowBase.limit_price = price;
+    rowBase.size_shares = size;
 
     const result = await clob.createAndPostOrder(
       {
