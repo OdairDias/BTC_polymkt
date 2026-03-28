@@ -121,7 +121,7 @@ Usa [`@polymarket/clob-client`](https://www.npmjs.com/package/@polymarket/clob-c
 **Checklist antes de ligar:**
 
 1. Carteira com **USDC na Polygon** e **allowances** para contratos Polymarket (como no site ao negociar).
-2. `POLYMARKET_PRIVATE_KEY` — chave da carteira **EOA** (nunca commitar). Se usas proxy Polymarket, ajusta `POLYMARKET_SIGNATURE_TYPE` (`0` EOA, `1` proxy, `2` Gnosis Safe) e opcionalmente `POLYMARKET_FUNDER_ADDRESS`.
+2. `POLYMARKET_PRIVATE_KEY` — chave da carteira **EOA** em **hex de 64 caracteres** (`0x` opcional; só `0-9` e `a-f`). **Não** é o address público, **não** é chave Solana/Base58. Exportar no Phantom na conta **Ethereum/Polygon**. Se usas proxy Polymarket, ajusta `POLYMARKET_SIGNATURE_TYPE` (`0` EOA, `1` proxy, `2` Gnosis Safe) e opcionalmente `POLYMARKET_FUNDER_ADDRESS`.
 3. `STRATEGY_DRY_RUN=false` **e** `STRATEGY_LIVE_ARMED=true` — as duas; sem isso **não** envia ordem.
 4. Railway: **Node 20+** no serviço (`engines` no `package.json`).
 
