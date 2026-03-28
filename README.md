@@ -126,6 +126,7 @@ Usa [`@polymarket/clob-client`](https://www.npmjs.com/package/@polymarket/clob-c
 4. **EOA pura** — se negocias só com uma carteira onde o USDC está **on-chain nesse mesmo `0x`**, usa **`POLYMARKET_SIGNATURE_TYPE=0`** e deixa **`POLYMARKET_FUNDER_ADDRESS`** vazio. USDC na Polygon (muitas vezes **USDC.e**) + **allowance** aos contratos da exchange, como na [documentação de pré-requisitos](https://docs.polymarket.com/developers/CLOB/orders/create-order).
 5. `STRATEGY_DRY_RUN=false` **e** `STRATEGY_LIVE_ARMED=true` — as duas; sem isso **não** envia ordem.
 6. Railway: **Node 20+** no serviço (`engines` no `package.json`).
+7. **Relayer / Builder API (opcional)** — se criaste chave em *Settings → Relayer API Keys* (ou Builder), define `RELAYER_API_KEY_ADDRESS` e **secret + passphrase**: ou variáveis `RELAYER_API_SECRET` e `RELAYER_API_PASSPHRASE`, ou `RELAYER_API_KEY` como JSON `{"secret":"...","passphrase":"..."}`. O `clob-client` usa isto como `BuilderConfig` e envia cabeçalhos `POLY_BUILDER_*` no `postOrder`. Isto **não substitui** `POLYMARKET_PRIVATE_KEY` nem o fluxo L2; pode ou não afetar erros do tipo *invalid signature* — vale testar se o suporte Polymarket indicar esse fluxo.
 
 **Nota (mínimos):** em alguns mercados o Polymarket exige **tamanho mínimo** de ordem (o gist menciona ~5 shares em certos casos). Com `STRATEGY_NOTIONAL_USD=1` e token a ~0,9$, isso pode ficar abaixo do mínimo — se após resolver o saldo aparecer erro de tamanho mínimo, aumenta o notional.
 

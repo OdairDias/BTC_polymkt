@@ -42,6 +42,14 @@ const DEFAULTS = {
     chainId: 137,
     signatureType: 0,
     funderAddress: ""
+  },
+
+  /** Builder/Relayer (opcional): cabeçalhos extra no POST /order do CLOB via @polymarket/builder-signing-sdk. */
+  relayer: {
+    apiKeyAddress: "",
+    apiKeyBlob: "",
+    apiSecret: "",
+    apiPassphrase: ""
   }
 };
 
@@ -135,5 +143,12 @@ export const CONFIG = {
       ? Number(process.env.POLYMARKET_SIGNATURE_TYPE)
       : DEFAULTS.live.signatureType,
     funderAddress: envString("POLYMARKET_FUNDER_ADDRESS", DEFAULTS.live.funderAddress)
+  },
+
+  relayer: {
+    apiKeyAddress: envString("RELAYER_API_KEY_ADDRESS", DEFAULTS.relayer.apiKeyAddress),
+    apiKeyBlob: envString("RELAYER_API_KEY", DEFAULTS.relayer.apiKeyBlob),
+    apiSecret: envString("RELAYER_API_SECRET", DEFAULTS.relayer.apiSecret),
+    apiPassphrase: envString("RELAYER_API_PASSPHRASE", DEFAULTS.relayer.apiPassphrase)
   }
 };

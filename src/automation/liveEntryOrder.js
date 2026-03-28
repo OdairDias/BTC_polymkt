@@ -1,6 +1,6 @@
 import { AssetType, OrderType, Side } from "@polymarket/clob-client";
 import { CONFIG } from "../config.js";
-import { getOrCreateClobClient } from "./liveClob.js";
+import { getOrCreateClobClient, isRelayerBuilderConfigured } from "./liveClob.js";
 import { insertLiveOrder } from "../db/postgresStrategy.js";
 
 const LIVE_DEBUG = process.env.STRATEGY_LIVE_DEBUG === "true";
@@ -151,7 +151,8 @@ export async function tryPlaceLiveEntryOrder({
       tickSize,
       negRisk,
       signatureType: CONFIG.live.signatureType,
-      funder: funderRaw ? `${funderRaw.slice(0, 6)}…${funderRaw.slice(-4)}` : null
+      funder: funderRaw ? `${funderRaw.slice(0, 6)}…${funderRaw.slice(-4)}` : null,
+      relayerBuilderHeaders: isRelayerBuilderConfigured()
     };
     if (LIVE_DEBUG) {
       console.error("[STRATEGY_LIVE_DEBUG] createAndPostMarketOrder context:", JSON.stringify(ctxLog));
@@ -209,7 +210,8 @@ export async function tryPlaceLiveEntryOrder({
         signatureType: CONFIG.live.signatureType,
         funder_masked: (CONFIG.live.funderAddress || "").trim()
           ? `${String(CONFIG.live.funderAddress).trim().slice(0, 6)}…${String(CONFIG.live.funderAddress).trim().slice(-4)}`
-          : null
+          : null,
+        relayer_builder_headers: isRelayerBuilderConfigured()
       }
     };
     if (LIVE_DEBUG) {

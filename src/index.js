@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { Wallet } from "ethers";
 import { CONFIG } from "./config.js";
-import { assertValidEvmPrivateKeyForClob } from "./automation/liveClob.js";
+import { assertValidEvmPrivateKeyForClob, isRelayerBuilderConfigured } from "./automation/liveClob.js";
 import { fetchKlines, fetchLastPrice } from "./data/binance.js";
 import { fetchChainlinkBtcUsd } from "./data/chainlink.js";
 import { startChainlinkPriceStream } from "./data/chainlinkWs.js";
@@ -425,9 +425,16 @@ async function main() {
         signerLog = "invalid_key";
       }
     }
+    const relayerBuilder = isRelayerBuilderConfigured();
+    const relayerHint = relayerBuilder
+      ? "relayerBuilder=on"
+      : (CONFIG.relayer.apiKeyAddress || "").trim()
+        ? "relayerBuilder=incomplete(secret+passphrase)"
+        : "relayerBuilder=off";
     console.log(
       `[strategy] dryRun=${CONFIG.strategy.dryRun} liveArmed=${CONFIG.strategy.liveArmed} ` +
         `privateKey=${pk ? "set" : "missing"} signer=${signerLog} signatureType=${CONFIG.live.signatureType} funder=${funderLog} ` +
+        `${relayerHint} ` +
         `notionalUsd=${CONFIG.strategy.notionalUsd} databaseUrl=${CONFIG.strategy.databaseUrl ? "set" : "missing"}`
     );
   }

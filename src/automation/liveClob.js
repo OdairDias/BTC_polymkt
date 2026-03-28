@@ -1,4 +1,5 @@
 import { ClobClient } from "@polymarket/clob-client";
+import { BuilderConfig } from "@polymarket/builder-signing-sdk";
 import { Wallet, getAddress } from "ethers";
 import { CONFIG } from "../config.js";
 
@@ -44,6 +45,67 @@ export function resetLiveClobClient() {
 }
 
 /**
+ * Credenciais locais do Builder (Polymarket UI: Relayer / Builder API Keys).
+ * O SDK exige key + secret + passphrase. Variáveis Railway sugeridas:
+ * - RELAYER_API_KEY_ADDRESS → campo `key` (no UI costuma ser o id da key ou o endereço indicado)
+ * - RELAYER_API_SECRET + RELAYER_API_PASSPHRASE → secret e passphrase (mostrados uma vez ao criar a key)
+ * - Ou RELAYER_API_KEY = JSON: {"secret":"...","passphrase":"..."}
+ * - Fallback: RELAYER_API_KEY numa linha = secret e passphrase iguais (raro; só se o site exportar um único segredo)
+ */
+export function parseRelayerBuilderCreds() {
+  const r = CONFIG.relayer;
+  const key = String(r.apiKeyAddress || "").trim();
+  if (!key) return null;
+
+  let secret = String(r.apiSecret || "").trim();
+  let passphrase = String(r.apiPassphrase || "").trim();
+  const blob = String(r.apiKeyBlob || "").trim();
+
+  if ((!secret || !passphrase) && blob) {
+    try {
+      const o = JSON.parse(blob);
+      if (o && typeof o.secret === "string" && typeof o.passphrase === "string") {
+        secret = o.secret.trim();
+        passphrase = o.passphrase.trim();
+      }
+    } catch {
+      const lines = blob
+        .split(/\r?\n/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (lines.length >= 2) {
+        secret = lines[0];
+        passphrase = lines[1];
+      } else if (blob.length > 0) {
+        secret = blob;
+        passphrase = blob;
+      }
+    }
+  }
+
+  if (!secret || !passphrase) return null;
+  return { key, secret, passphrase };
+}
+
+export function tryCreateRelayerBuilderConfig() {
+  const creds = parseRelayerBuilderCreds();
+  if (!creds) return undefined;
+  try {
+    return new BuilderConfig({ localBuilderCreds: creds });
+  } catch (e) {
+    throw new Error(
+      `RELAYER/Builder: credenciais inválidas para BuilderConfig (${e?.message ?? e}). ` +
+        "Confirma key + secret + passphrase (ver RELAYER_API_SECRET / RELAYER_API_PASSPHRASE ou JSON em RELAYER_API_KEY)."
+    );
+  }
+}
+
+/** Indica se o ambiente tem dados suficientes para tentar injetar cabeçalhos Builder no postOrder. */
+export function isRelayerBuilderConfigured() {
+  return parseRelayerBuilderCreds() != null;
+}
+
+/**
  * Cliente assinado com API L2 (createOrDeriveApiKey na primeira chamada).
  */
 export async function getOrCreateClobClient() {
@@ -70,8 +132,11 @@ export async function getOrCreateClobClient() {
           );
         }
       }
+      const builderConfig = tryCreateRelayerBuilderConfig();
+
       // useServerTime: timestamps L2 alinhados ao servidor (menos falhas opacas).
       // Não forçar POLY_ADDRESS=funder: a API responde *order signer address has to be the address of the API KEY* (EOA).
+      // Com BuilderConfig válido, postOrder injeta POLY_BUILDER_* (Relayer / Builder API no painel Polymarket).
       return new ClobClient(
         host,
         chainId,
@@ -81,7 +146,7 @@ export async function getOrCreateClobClient() {
         funderNorm,
         undefined,
         true,
-        undefined,
+        builderConfig,
         undefined,
         undefined,
         undefined,
