@@ -20,26 +20,33 @@ function roundDownDecimals(n, places) {
 }
 
 /**
- * O CLOB rejeita BUY FOK se os montantes humanos violarem:
- * maker (USDC) ≤ 2 decimais, taker (shares) ≤ 4 decimais (mensagem "invalid amounts").
+ * O CLOB rejeita BUY FOK com "invalid amounts" se maker/taker tiverem precisão a mais.
+ * O `@polymarket/clob-client` aplica `roundDown(size, 2)` em todos os ticks (ROUNDING_CONFIG);
+ * se enviarmos 4 decimais no size, o SDK altera o size e o produto price×size ganha ruído float.
+ * Por isso alinhamos **preço ao tick**, **shares a 2 decimais** e **USDC (maker) a 2 decimais**, com `.toFixed` para evitar binários.
  */
 export function quantizeBuyLimitForClob(price, sizeShares, tickSizeStr) {
   const tickDec = decimalsFromTickString(tickSizeStr);
-  const p = roundDownDecimals(Number(price), tickDec);
+  const p = Number(roundDownDecimals(Number(price), tickDec).toFixed(tickDec));
   if (!Number.isFinite(p) || p <= 0) {
     throw new Error(`preço inválido após tick (${tickSizeStr})`);
   }
-  let s = roundDownDecimals(Number(sizeShares), 4);
+
+  let s = Number(roundDownDecimals(Number(sizeShares), 2).toFixed(2));
   if (!Number.isFinite(s) || s <= 0) {
-    throw new Error("size inválido após 4 decimais");
+    throw new Error("size inválido após 2 decimais (alinhado ao clob-client)");
   }
-  let makerUsd = roundDownDecimals(s * p, 2);
+
+  let makerUsd = Number(roundDownDecimals(s * p, 2).toFixed(2));
   if (makerUsd < 0.01) {
     throw new Error("USDC maker < 0.01 após arredondar — aumenta STRATEGY_NOTIONAL_USD");
   }
-  s = roundDownDecimals(makerUsd / p, 4);
-  if (!Number.isFinite(s) || s <= 0) {
-    throw new Error("size zero após alinhar maker USDC (2 dec)");
+
+  s = Number(roundDownDecimals(makerUsd / p, 2).toFixed(2));
+  makerUsd = Number(roundDownDecimals(s * p, 2).toFixed(2));
+
+  if (!Number.isFinite(s) || s <= 0 || makerUsd < 0.01) {
+    throw new Error("size/maker zero após alinhar USDC (2 dec) e shares (2 dec)");
   }
   return { price: p, size: s, makerUsd };
 }
