@@ -105,8 +105,12 @@ Opcional: gravar **uma decisão simulada por mercado** quando o relógio **entra
 - `STRATEGY_ENTRY_MINUTES_LEFT` (default: `2`) — janela: `0 < tempo_restante_min <= N`.
 - `STRATEGY_PRICE_EPSILON` (default: `0.001`) — empate se `|up_mid - down_mid| <= epsilon`.
 - `STRATEGY_NOTIONAL_USD` (default: `1`).
+- `STRATEGY_OUTCOME_LAST_SECONDS` (default: `5`) — ao **entrar** na janela final (tempo restante ≤ N segundos e > 0), grava o resultado na segunda tabela.
 
-A tabela `strategy_paper_signals` é criada no **primeiro uso** (ver também `db/schema.sql`). **Um slug de mercado = no máximo uma linha** (`UNIQUE market_slug`).
+**Tabelas Postgres** (criadas no primeiro uso; ver `db/schema.sql`):
+
+1. **`strategy_paper_signals`** — entrada paper (uma linha por `market_slug`).
+2. **`strategy_paper_outcomes`** — resultado inferido pelos **mids UP/DOWN** nessa janela final; liga em `entry_id`; calcula `entry_correct` e `pnl_simulated_usd` quando houve lado UP/DOWN na entrada.
 
 **Railway:** crie um serviço Postgres, copie `DATABASE_URL` para o app, defina `STRATEGY_ENABLED=true`, `npm start` como comando.
 

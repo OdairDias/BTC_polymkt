@@ -27,6 +27,7 @@ import path from "node:path";
 import readline from "node:readline";
 import { applyGlobalProxyFromEnv } from "./net/proxy.js";
 import { runPaperStrategyTick } from "./automation/paperStrategy.js";
+import { runPaperOutcomeTick } from "./automation/paperOutcome.js";
 
 function countVwapCrosses(closes, vwapSeries, lookback) {
   if (closes.length < lookback || vwapSeries.length < lookback) return null;
@@ -668,9 +669,12 @@ async function main() {
         : ANSI.reset;
 
       let strategyStatusLine = null;
+      let outcomeStatusLine = null;
       if (CONFIG.strategy.enabled) {
         const st = await runPaperStrategyTick({ poly, settlementLeftMin });
         if (st?.line) strategyStatusLine = st.line;
+        const ot = await runPaperOutcomeTick({ poly, settlementLeftMin });
+        if (ot?.line) outcomeStatusLine = ot.line;
       }
 
       const lines = [
@@ -678,6 +682,7 @@ async function main() {
         marketLine,
         kv("Time left:", `${timeColor}${fmtTimeLeft(timeLeftMin)}${ANSI.reset}`),
         strategyStatusLine ? `${padLabel("Paper strategy:", LABEL_W)}${strategyStatusLine}` : null,
+        outcomeStatusLine ? `${padLabel("Paper outcome:", LABEL_W)}${outcomeStatusLine}` : null,
         "",
         sepLine(),
         "",

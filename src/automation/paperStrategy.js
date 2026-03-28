@@ -1,7 +1,8 @@
 import { CONFIG } from "../config.js";
 import { midFromBook } from "../strategy/pricing.js";
 import { decideLateWindowSide } from "../strategy/lateWindow.js";
-import { getStrategyPool, ensureStrategySchema, insertPaperSignal } from "../db/postgresStrategy.js";
+import { getStrategyPool, ensureStrategySchemaOnce, insertPaperSignal, resetStrategySchemaFlag } from "../db/postgresStrategy.js";
+import { resetOutcomeTrailForTests } from "./paperOutcome.js";
 
 const ANSI_GREEN = "\x1b[32m";
 const ANSI_YELLOW = "\x1b[33m";
@@ -9,14 +10,14 @@ const ANSI_RED = "\x1b[31m";
 const ANSI_GRAY = "\x1b[90m";
 const ANSI_RESET = "\x1b[0m";
 
-let schemaReady = false;
 let warnedNoDb = false;
 
 /** slug -> último minutes_left visto (para disparar só ao entrar na janela) */
 const slugMinutesLeftTrail = new Map();
 
 export function resetStrategyDbStateForTests() {
-  schemaReady = false;
+  resetStrategySchemaFlag();
+  resetOutcomeTrailForTests();
   warnedNoDb = false;
   slugMinutesLeftTrail.clear();
 }
@@ -96,13 +97,9 @@ export async function runPaperStrategyTick({ poly, settlementLeftMin }) {
   }
 
   const pool = getStrategyPool(s.databaseUrl);
+  await ensureStrategySchemaOnce(pool);
   const client = await pool.connect();
   try {
-    if (!schemaReady) {
-      await ensureStrategySchema(client);
-      schemaReady = true;
-    }
-
     let entryPrice = null;
     let simulatedShares = null;
     if (decision.side === "UP" && upBuy != null && Number.isFinite(Number(upBuy)) && Number(upBuy) > 0) {

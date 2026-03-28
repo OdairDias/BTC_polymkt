@@ -50,7 +50,50 @@ export async function ensureStrategySchema(client) {
     );
     CREATE INDEX IF NOT EXISTS idx_strategy_paper_signals_created
       ON strategy_paper_signals (created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS strategy_paper_outcomes (
+      id BIGSERIAL PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      entry_id BIGINT NOT NULL REFERENCES strategy_paper_signals(id) ON DELETE CASCADE,
+      market_slug TEXT NOT NULL,
+      seconds_left_at_eval NUMERIC NOT NULL,
+      evaluation_method TEXT NOT NULL DEFAULT 'last_5s_mid',
+      up_mid NUMERIC,
+      down_mid NUMERIC,
+      up_best_bid NUMERIC,
+      up_best_ask NUMERIC,
+      down_best_bid NUMERIC,
+      down_best_ask NUMERIC,
+      inferred_winner TEXT,
+      outcome_code TEXT NOT NULL,
+      entry_chosen_side TEXT,
+      entry_correct BOOLEAN,
+      pnl_simulated_usd NUMERIC,
+      dry_run BOOLEAN NOT NULL DEFAULT true,
+      UNIQUE(entry_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_strategy_paper_outcomes_slug
+      ON strategy_paper_outcomes (market_slug);
+    CREATE INDEX IF NOT EXISTS idx_strategy_paper_outcomes_created
+      ON strategy_paper_outcomes (created_at DESC);
   `);
+}
+
+let schemaReadyGlobal = false;
+
+export async function ensureStrategySchemaOnce(pool) {
+  if (schemaReadyGlobal) return;
+  const c = await pool.connect();
+  try {
+    await ensureStrategySchema(c);
+    schemaReadyGlobal = true;
+  } finally {
+    c.release();
+  }
+}
+
+export function resetStrategySchemaFlag() {
+  schemaReadyGlobal = false;
 }
 
 /**
@@ -86,6 +129,49 @@ export async function insertPaperSignal(client, row) {
       row.notional_usd,
       row.entry_price ?? null,
       row.simulated_shares ?? null,
+      row.dry_run
+    ]
+  );
+  if (res.rowCount > 0 && res.rows[0]?.id != null) {
+    return { inserted: true, id: res.rows[0].id };
+  }
+  return { inserted: false };
+}
+
+export async function findPaperEntryBySlug(client, marketSlug) {
+  const res = await client.query(
+    `SELECT id, market_slug, chosen_side, entry_price, notional_usd, result_code, dry_run
+     FROM strategy_paper_signals WHERE market_slug = $1 LIMIT 1`,
+    [marketSlug]
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function insertPaperOutcome(client, row) {
+  const res = await client.query(
+    `INSERT INTO strategy_paper_outcomes (
+      entry_id, market_slug, seconds_left_at_eval, evaluation_method,
+      up_mid, down_mid, up_best_bid, up_best_ask, down_best_bid, down_best_ask,
+      inferred_winner, outcome_code, entry_chosen_side, entry_correct, pnl_simulated_usd, dry_run
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+    ON CONFLICT (entry_id) DO NOTHING
+    RETURNING id`,
+    [
+      row.entry_id,
+      row.market_slug,
+      row.seconds_left_at_eval,
+      row.evaluation_method ?? "last_5s_mid",
+      row.up_mid ?? null,
+      row.down_mid ?? null,
+      row.up_best_bid ?? null,
+      row.up_best_ask ?? null,
+      row.down_best_bid ?? null,
+      row.down_best_ask ?? null,
+      row.inferred_winner ?? null,
+      row.outcome_code,
+      row.entry_chosen_side ?? null,
+      row.entry_correct ?? null,
+      row.pnl_simulated_usd ?? null,
       row.dry_run
     ]
   );

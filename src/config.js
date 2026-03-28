@@ -31,7 +31,8 @@ const DEFAULTS = {
     dryRun: true,
     entryMinutesLeft: 2,
     priceEpsilon: 0.001,
-    notionalUsd: 1
+    notionalUsd: 1,
+    outcomeLastSeconds: 5
   }
 };
 
@@ -108,6 +109,10 @@ export const CONFIG = {
       Number(process.env.STRATEGY_ENTRY_MINUTES_LEFT) || DEFAULTS.strategy.entryMinutesLeft
     ),
     priceEpsilon: Math.max(0, Number(process.env.STRATEGY_PRICE_EPSILON) || DEFAULTS.strategy.priceEpsilon),
-    notionalUsd: Math.max(0.01, Number(process.env.STRATEGY_NOTIONAL_USD) || DEFAULTS.strategy.notionalUsd)
+    notionalUsd: Math.max(0.01, Number(process.env.STRATEGY_NOTIONAL_USD) || DEFAULTS.strategy.notionalUsd),
+    outcomeLastSeconds: Math.max(
+      1,
+      Number(process.env.STRATEGY_OUTCOME_LAST_SECONDS) || DEFAULTS.strategy.outcomeLastSeconds
+    )
   }
 };
