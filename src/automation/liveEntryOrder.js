@@ -141,7 +141,7 @@ export async function tryPlaceLiveEntryOrder({
       try {
         const c = await getOrCreateClobClient();
         const ba = await c.getBalanceAllowance({ asset_type: AssetType.COLLATERAL });
-        msg = `${msg} · collateral balance=${ba.balance} allowance=${ba.allowance}`;
+        msg = `${msg} · collateral balance=${ba.balance} allowance=${ba.allowance ?? "—"}`;
       } catch {
         // ignora falha do diagnóstico
       }

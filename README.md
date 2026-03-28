@@ -120,10 +120,14 @@ Usa [`@polymarket/clob-client`](https://www.npmjs.com/package/@polymarket/clob-c
 
 **Checklist antes de ligar:**
 
-1. Carteira com **USDC na Polygon** e **allowances** para contratos Polymarket (como no site ao negociar).
-2. `POLYMARKET_PRIVATE_KEY` — chave da carteira **EOA** em **hex de 64 caracteres** (`0x` opcional; só `0-9` e `a-f`). **Não** é o address público, **não** é chave Solana/Base58. Exportar no Phantom na conta **Ethereum/Polygon**. Se usas proxy Polymarket, ajusta `POLYMARKET_SIGNATURE_TYPE` (`0` EOA, `1` proxy, `2` Gnosis Safe) e opcionalmente `POLYMARKET_FUNDER_ADDRESS`.
-3. `STRATEGY_DRY_RUN=false` **e** `STRATEGY_LIVE_ARMED=true` — as duas; sem isso **não** envia ordem.
-4. Railway: **Node 20+** no serviço (`engines` no `package.json`).
+1. **Colateral CLOB** — o endpoint `getBalanceAllowance` tem de mostrar saldo &gt; 0 para `COLLATERAL`. Se nos logs aparece `collateral balance=0`, o CLOB **não** vê USDC disponível para a combinação (assinante + funder) que estás a usar.
+2. **`POLYMARKET_PRIVATE_KEY`** — chave **EOA** em hex (64 caracteres). Assina ordens e deriva credenciais L2.
+3. **Proxy Polymarket (muito comum com Phantom / conta “normal” no site)** — o saldo pode estar na **carteira proxy** do perfil, não na EOA. Nesse caso define **`POLYMARKET_SIGNATURE_TYPE=1`** e **`POLYMARKET_FUNDER_ADDRESS=`** o endereço **`0x…` do perfil** (o mesmo que mostra “Address” nas definições). Sem isto, o CLOB continua com `balance: 0` mesmo com fundos visíveis no site. Referência alinhada ao fluxo de ordens do guia [Polymarket BTC 5m bot (gist)](https://gist.github.com/Archetapp/7680adabc48f812a561ca79d73cbac69) (`POLY_SIGNATURE_TYPE=1`, `POLY_FUNDER_ADDRESS`).
+4. **EOA pura** — se negocias só com uma carteira onde o USDC está **on-chain nesse mesmo `0x`**, usa **`POLYMARKET_SIGNATURE_TYPE=0`** e deixa **`POLYMARKET_FUNDER_ADDRESS`** vazio. USDC na Polygon (muitas vezes **USDC.e**) + **allowance** aos contratos da exchange, como na [documentação de pré-requisitos](https://docs.polymarket.com/developers/CLOB/orders/create-order).
+5. `STRATEGY_DRY_RUN=false` **e** `STRATEGY_LIVE_ARMED=true` — as duas; sem isso **não** envia ordem.
+6. Railway: **Node 20+** no serviço (`engines` no `package.json`).
+
+**Nota (mínimos):** em alguns mercados o Polymarket exige **tamanho mínimo** de ordem (o gist menciona ~5 shares em certos casos). Com `STRATEGY_NOTIONAL_USD=1` e token a ~0,9$, isso pode ficar abaixo do mínimo — se após resolver o saldo aparecer erro de tamanho mínimo, aumenta o notional.
 
 Documentação oficial: [CLOB — Create order](https://docs.polymarket.com/developers/CLOB/orders/create-order), [Authentication](https://docs.polymarket.com/developers/CLOB/authentication).
 

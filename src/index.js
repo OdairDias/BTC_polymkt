@@ -411,10 +411,13 @@ async function fetchPolymarketSnapshot() {
 async function main() {
   if (CONFIG.strategy.enabled) {
     const pk = (CONFIG.live.privateKey || "").trim();
+    const fa = (CONFIG.live.funderAddress || "").trim();
+    const funderLog =
+      fa.length >= 12 ? `${fa.slice(0, 6)}…${fa.slice(-4)}` : fa ? "set(short)" : "none";
     console.log(
       `[strategy] dryRun=${CONFIG.strategy.dryRun} liveArmed=${CONFIG.strategy.liveArmed} ` +
-        `privateKey=${pk ? "set" : "missing"} notionalUsd=${CONFIG.strategy.notionalUsd} ` +
-        `databaseUrl=${CONFIG.strategy.databaseUrl ? "set" : "missing"}`
+        `privateKey=${pk ? "set" : "missing"} signatureType=${CONFIG.live.signatureType} funder=${funderLog} ` +
+        `notionalUsd=${CONFIG.strategy.notionalUsd} databaseUrl=${CONFIG.strategy.databaseUrl ? "set" : "missing"}`
     );
   }
 
