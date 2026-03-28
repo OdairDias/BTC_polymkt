@@ -1,5 +1,7 @@
 import "dotenv/config";
+import { Wallet } from "ethers";
 import { CONFIG } from "./config.js";
+import { assertValidEvmPrivateKeyForClob } from "./automation/liveClob.js";
 import { fetchKlines, fetchLastPrice } from "./data/binance.js";
 import { fetchChainlinkBtcUsd } from "./data/chainlink.js";
 import { startChainlinkPriceStream } from "./data/chainlinkWs.js";
@@ -414,9 +416,18 @@ async function main() {
     const fa = (CONFIG.live.funderAddress || "").trim();
     const funderLog =
       fa.length >= 12 ? `${fa.slice(0, 6)}…${fa.slice(-4)}` : fa ? "set(short)" : "none";
+    let signerLog = "n/a";
+    if (pk) {
+      try {
+        const addr = new Wallet(assertValidEvmPrivateKeyForClob(pk)).address;
+        signerLog = `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+      } catch {
+        signerLog = "invalid_key";
+      }
+    }
     console.log(
       `[strategy] dryRun=${CONFIG.strategy.dryRun} liveArmed=${CONFIG.strategy.liveArmed} ` +
-        `privateKey=${pk ? "set" : "missing"} signatureType=${CONFIG.live.signatureType} funder=${funderLog} ` +
+        `privateKey=${pk ? "set" : "missing"} signer=${signerLog} signatureType=${CONFIG.live.signatureType} funder=${funderLog} ` +
         `notionalUsd=${CONFIG.strategy.notionalUsd} databaseUrl=${CONFIG.strategy.databaseUrl ? "set" : "missing"}`
     );
   }

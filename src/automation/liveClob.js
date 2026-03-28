@@ -1,5 +1,5 @@
 import { ClobClient } from "@polymarket/clob-client";
-import { Wallet } from "ethers";
+import { Wallet, getAddress } from "ethers";
 import { CONFIG } from "../config.js";
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
@@ -58,7 +58,17 @@ export async function getOrCreateClobClient() {
       const chainId = CONFIG.live.chainId;
       const temp = new ClobClient(host, chainId, signer);
       const creds = await temp.createOrDeriveApiKey();
-      const funder = (CONFIG.live.funderAddress || "").trim();
+      const funderRaw = (CONFIG.live.funderAddress || "").trim();
+      let funderNorm;
+      if (funderRaw) {
+        try {
+          funderNorm = getAddress(funderRaw);
+        } catch {
+          throw new Error(
+            "POLYMARKET_FUNDER_ADDRESS inválido: tem de ser um endereço EVM (0x + 40 hex). Copia do perfil Polymarket."
+          );
+        }
+      }
       // throwOnError=true: respostas com campo `error` passam a lançar (evita “sucesso” falso).
       return new ClobClient(
         host,
@@ -66,7 +76,7 @@ export async function getOrCreateClobClient() {
         signer,
         creds,
         CONFIG.live.signatureType,
-        funder || undefined,
+        funderNorm,
         undefined,
         undefined,
         undefined,
