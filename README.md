@@ -34,7 +34,7 @@ npm install
 
 ### 3) Environment variables (recommended)
 
-Configuration uses **`src/config.js`** defaults (BTC 5m, estratégia paper ligada, etc.). **Variáveis de ambiente** (Railway ou `.env`) sobrescrevem esses valores. Para o Postgres, use **`DATABASE_URL`** (Railway injeta ao referenciar o plugin) ou, se estiver vazio, **`PUBLIC_URL_POSTGRES`** (ex.: URL pública no `.env` local). Não commite credenciais no repositório. O app carrega **`.env`** automaticamente se existir (via [`dotenv`](https://github.com/motdotla/dotenv)).
+Configuration uses **`src/config.js`** defaults (BTC 5m, estratégia paper ligada, etc.). **Variáveis de ambiente** (Railway ou `.env`) sobrescrevem esses valores. A única variável que o Railway **precisa** fornecer para o Postgres é **`DATABASE_URL`** (não coloque isso no código). O app carrega **`.env`** automaticamente se existir (via [`dotenv`](https://github.com/motdotla/dotenv)).
 
 1. Copy the example file:
 
@@ -100,8 +100,7 @@ Notes:
 Opcional: gravar **uma decisão simulada por mercado** quando o relógio **entra** na última janela de N minutos antes do `endDate` (padrão **2 min**). Compara **mid** do book UP vs DOWN (`(bid+ask)/2`, ou fallback no preço buy); o maior vence; empate (dentro de `STRATEGY_PRICE_EPSILON`) → `SKIP_TIE`. Notional padrão **US$ 1** simulado.
 
 - `STRATEGY_ENABLED` (default: `false`) — ligue com `true` para ativar.
-- `DATABASE_URL` — connection string Postgres (prioridade; ex.: Railway → referência ao plugin).
-- `PUBLIC_URL_POSTGRES` — usada se `DATABASE_URL` estiver vazio (ex.: link público no `.env` local).
+- `DATABASE_URL` — connection string Postgres (ex.: Railway **Variables** → plugin Postgres).
 - `STRATEGY_DRY_RUN` (default: `true`) — mantém só simulação; `false` reservado para futura ordem real.
 - `STRATEGY_ENTRY_MINUTES_LEFT` (default: `2`) — janela: `0 < tempo_restante_min <= N`.
 - `STRATEGY_PRICE_EPSILON` (default: `0.001`) — empate se `|up_mid - down_mid| <= epsilon`.
