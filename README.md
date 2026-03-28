@@ -1,6 +1,6 @@
-# Polymarket BTC 15m Assistant
+# Polymarket BTC 5m Assistant
 
-A real-time console trading assistant for Polymarket **"Bitcoin Up or Down" 15-minute** markets.
+A real-time console trading assistant for Polymarket **"Bitcoin Up or Down" 5-minute** markets.
 
 It combines:
 - Polymarket market selection + UP/DOWN prices + liquidity
@@ -21,15 +21,8 @@ It combines:
 ### 1) Clone the repository
 
 ```bash
-git clone https://github.com/FrondEnt/PolymarketBTC15mAssistant.git
+git clone https://github.com/oGabrielFreitas/PolymarketBTC15mAssistant.git
 ```
-
-Alternative (no git):
-
-- Click the green `<> Code` button on GitHub
-- Choose `Download ZIP`
-- Extract the ZIP
-- Open a terminal in the extracted project folder
 
 Then open a terminal in the project folder.
 
@@ -39,9 +32,20 @@ Then open a terminal in the project folder.
 npm install
 ```
 
-### 3) (Optional) Set environment variables
+### 3) Environment variables (recommended)
 
-You can run without extra config (defaults are included), but for more stable Chainlink fallback it’s recommended to set at least one Polygon RPC.
+Configuration uses **`src/config.js`** defaults (BTC 5m, estratégia paper ligada, etc.). **Variáveis de ambiente** (Railway ou `.env`) sobrescrevem esses valores. A única variável que o Railway **precisa** fornecer para o Postgres é **`DATABASE_URL`** (não coloque isso no código). O app carrega **`.env`** automaticamente se existir (via [`dotenv`](https://github.com/motdotla/dotenv)).
+
+1. Copy the example file:
+
+   ```bash
+   copy .env.example .env
+   ```
+   (On macOS/Linux: `cp .env.example .env`)
+
+2. Edit `.env` if needed. Defaults target **BTC 5m** (`POLYMARKET_SERIES_ID=10684`, `POLYMARKET_SERIES_SLUG=btc-up-or-down-5m`).
+
+You can still export variables in the shell instead of using `.env`; see below for Polygon RPC (optional but recommended for Chainlink fallback).
 
 #### Windows PowerShell (current terminal session)
 
@@ -55,7 +59,7 @@ Optional Polymarket settings:
 
 ```powershell
 $env:POLYMARKET_AUTO_SELECT_LATEST = "true"
-# $env:POLYMARKET_SLUG = "btc-updown-15m-..."   # pin a specific market
+# $env:POLYMARKET_SLUG = "btc-updown-5m-..."   # pin a specific market
 ```
 
 #### Windows CMD (current terminal session)
@@ -70,28 +74,49 @@ Optional Polymarket settings:
 
 ```cmd
 set POLYMARKET_AUTO_SELECT_LATEST=true
-REM set POLYMARKET_SLUG=btc-updown-15m-...
+REM set POLYMARKET_SLUG=btc-updown-5m-...
 ```
 
 Notes:
-- These environment variables apply only to the current terminal window.
-- If you want permanent env vars, set them via Windows System Environment Variables or use a `.env` loader of your choice.
+- Variables set only in the shell apply to that terminal window.
+- Using `.env` keeps **5m** (or custom) settings between sessions.
 
 ## Configuration
-
-This project reads configuration from environment variables.
-
-You can set them in your shell, or create a `.env` file and load it using your preferred method.
 
 ### Polymarket
 
 - `POLYMARKET_AUTO_SELECT_LATEST` (default: `true`)
-  - When `true`, automatically picks the latest 15m market.
-- `POLYMARKET_SERIES_ID` (default: `10192`)
-- `POLYMARKET_SERIES_SLUG` (default: `btc-up-or-down-15m`)
+  - When `true`, automatically picks the latest market for the configured series.
+- `POLYMARKET_SERIES_ID` (default: `10684` for **BTC 5m**)
+- `POLYMARKET_SERIES_SLUG` (default: `btc-up-or-down-5m`)
 - `POLYMARKET_SLUG` (optional)
-  - If set, the assistant will target a specific market slug.
+  - If set, the assistant targets that specific market slug.
 - `POLYMARKET_LIVE_WS_URL` (default: `wss://ws-live-data.polymarket.com`)
+- `CANDLE_WINDOW_MINUTES` (default: `5`)
+  - Should match the market timeframe (use `15` if you point the series to 15m markets).
+
+### Paper strategy (Postgres, dry run)
+
+Opcional: gravar **uma decisão simulada por mercado** quando o relógio **entra** na última janela de N minutos antes do `endDate` (padrão **2 min**). Compara **mid** do book UP vs DOWN (`(bid+ask)/2`, ou fallback no preço buy); o maior vence; empate (dentro de `STRATEGY_PRICE_EPSILON`) → `SKIP_TIE`. Notional padrão **US$ 1** simulado.
+
+- `STRATEGY_ENABLED` (default: `false`) — ligue com `true` para ativar.
+- `DATABASE_URL` — connection string Postgres (ex.: Railway **Variables** → plugin Postgres).
+- `STRATEGY_DRY_RUN` (default: `true`) — mantém só simulação; `false` reservado para futura ordem real.
+- `STRATEGY_ENTRY_MINUTES_LEFT` (default: `2`) — janela: `0 < tempo_restante_min <= N`.
+- `STRATEGY_PRICE_EPSILON` (default: `0.001`) — empate se `|up_mid - down_mid| <= epsilon`.
+- `STRATEGY_NOTIONAL_USD` (default: `1`).
+
+A tabela `strategy_paper_signals` é criada no **primeiro uso** (ver também `db/schema.sql`). **Um slug de mercado = no máximo uma linha** (`UNIQUE market_slug`).
+
+**Railway:** crie um serviço Postgres, copie `DATABASE_URL` para o app, defina `STRATEGY_ENABLED=true`, `npm start` como comando.
+
+### Descobrir `series_id` e slug para outro timeframe (ex.: 5m → 15m)
+
+1. No site do Polymarket, abra a série desejada e copie o **slug** da série (ex.: `btc-up-or-down-5m`).
+2. Consulte a API Gamma, por exemplo:  
+   `https://gamma-api.polymarket.com/series?slug=SEU-SLUG`  
+   No JSON, use o campo **`id`** da série como `POLYMARKET_SERIES_ID` (ex.: `10684` para 5m).
+3. Salve `POLYMARKET_SERIES_SLUG` e `POLYMARKET_SERIES_ID` no `.env` e rode `npm start` de novo.
 
 ### Chainlink on Polygon (fallback)
 

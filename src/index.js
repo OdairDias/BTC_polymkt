@@ -1,3 +1,4 @@
+import "dotenv/config";
 import { CONFIG } from "./config.js";
 import { fetchKlines, fetchLastPrice } from "./data/binance.js";
 import { fetchChainlinkBtcUsd } from "./data/chainlink.js";
@@ -25,6 +26,7 @@ import fs from "node:fs";
 import path from "node:path";
 import readline from "node:readline";
 import { applyGlobalProxyFromEnv } from "./net/proxy.js";
+import { runPaperStrategyTick } from "./automation/paperStrategy.js";
 
 function countVwapCrosses(closes, vwapSeries, lookback) {
   if (closes.length < lookback || vwapSeries.length < lookback) return null;
@@ -281,7 +283,17 @@ const marketCache = {
   fetchedAtMs: 0
 };
 
-async function resolveCurrentBtc15mMarket() {
+function timeLeftColorBand(minutesLeft, windowMinutes) {
+  const w = Math.max(1, Number(windowMinutes) || 1);
+  const hi = w * (10 / 15);
+  const mid = w * (5 / 15);
+  if (minutesLeft >= hi) return ANSI.green;
+  if (minutesLeft >= mid) return ANSI.yellow;
+  if (minutesLeft >= 0 && minutesLeft < mid) return ANSI.red;
+  return ANSI.reset;
+}
+
+async function resolveCurrentBtcMarket() {
   if (CONFIG.polymarket.marketSlug) {
     return await fetchMarketBySlug(CONFIG.polymarket.marketSlug);
   }
@@ -303,7 +315,7 @@ async function resolveCurrentBtc15mMarket() {
 }
 
 async function fetchPolymarketSnapshot() {
-  const market = await resolveCurrentBtc15mMarket();
+  const market = await resolveCurrentBtcMarket();
 
   if (!market) return { ok: false, reason: "market_not_found" };
 
@@ -648,29 +660,24 @@ async function main() {
       const titleLine = poly.ok ? `${poly.market?.question ?? "-"}` : "-";
       const marketLine = kv("Market:", poly.ok ? (poly.market?.slug ?? "-") : "-");
 
-      const timeColor = timeLeftMin >= 10 && timeLeftMin <= 15
-        ? ANSI.green
-        : timeLeftMin >= 5 && timeLeftMin < 10
-          ? ANSI.yellow
-          : timeLeftMin >= 0 && timeLeftMin < 5
-            ? ANSI.red
-            : ANSI.reset;
+      const timeColor = timeLeftColorBand(timeLeftMin, CONFIG.candleWindowMinutes);
       const timeLeftLine = `⏱ Time left: ${timeColor}${fmtTimeLeft(timeLeftMin)}${ANSI.reset}`;
 
       const polyTimeLeftColor = settlementLeftMin !== null
-        ? (settlementLeftMin >= 10 && settlementLeftMin <= 15
-          ? ANSI.green
-          : settlementLeftMin >= 5 && settlementLeftMin < 10
-            ? ANSI.yellow
-            : settlementLeftMin >= 0 && settlementLeftMin < 5
-              ? ANSI.red
-              : ANSI.reset)
+        ? timeLeftColorBand(settlementLeftMin, CONFIG.candleWindowMinutes)
         : ANSI.reset;
+
+      let strategyStatusLine = null;
+      if (CONFIG.strategy.enabled) {
+        const st = await runPaperStrategyTick({ poly, settlementLeftMin });
+        if (st?.line) strategyStatusLine = st.line;
+      }
 
       const lines = [
         titleLine,
         marketLine,
         kv("Time left:", `${timeColor}${fmtTimeLeft(timeLeftMin)}${ANSI.reset}`),
+        strategyStatusLine ? `${padLabel("Paper strategy:", LABEL_W)}${strategyStatusLine}` : null,
         "",
         sepLine(),
         "",

@@ -1,3 +1,63 @@
+/**
+ * Valores padrão da aplicação (BTC 5m + estratégia paper).
+ * Railway / `.env` podem sobrescrever qualquer chave via process.env.
+ *
+ * Nunca coloque DATABASE_URL ou segredos neste arquivo — use variáveis no Railway.
+ */
+
+const DEFAULTS = {
+  candleWindowMinutes: 5,
+
+  polymarket: {
+    marketSlug: "",
+    seriesId: "10684",
+    seriesSlug: "btc-up-or-down-5m",
+    autoSelectLatest: true,
+    liveDataWsUrl: "wss://ws-live-data.polymarket.com",
+    upOutcomeLabel: "Up",
+    downOutcomeLabel: "Down"
+  },
+
+  chainlink: {
+    polygonRpcUrls: "",
+    polygonRpcUrl: "https://polygon-rpc.com",
+    polygonWssUrls: "",
+    polygonWssUrl: "",
+    btcUsdAggregator: "0xc907E116054Ad103354f2D350FD2514433D57F6f"
+  },
+
+  strategy: {
+    enabled: true,
+    dryRun: true,
+    entryMinutesLeft: 2,
+    priceEpsilon: 0.001,
+    notionalUsd: 1
+  }
+};
+
+function envString(key, fallback) {
+  const v = process.env[key];
+  if (v === undefined || v === "") return fallback;
+  return v;
+}
+
+function envBool(key, fallback) {
+  const v = process.env[key];
+  if (v === undefined || v === "") return fallback;
+  return String(v).toLowerCase() === "true";
+}
+
+function envBoolNeg(key, fallbackTrue) {
+  const v = process.env[key];
+  if (v === undefined || v === "") return fallbackTrue;
+  return String(v).toLowerCase() !== "false";
+}
+
+const candleWindowFromEnv = Number(process.env.CANDLE_WINDOW_MINUTES);
+const candleWindowMinutes = Number.isFinite(candleWindowFromEnv) && candleWindowFromEnv > 0
+  ? candleWindowFromEnv
+  : DEFAULTS.candleWindowMinutes;
+
 export const CONFIG = {
   symbol: "BTCUSDT",
   binanceBaseUrl: "https://api.binance.com",
@@ -5,7 +65,7 @@ export const CONFIG = {
   clobBaseUrl: "https://clob.polymarket.com",
 
   pollIntervalMs: 1_000,
-  candleWindowMinutes: 15,
+  candleWindowMinutes,
 
   vwapSlopeLookbackMinutes: 5,
   rsiPeriod: 14,
@@ -16,20 +76,38 @@ export const CONFIG = {
   macdSignal: 9,
 
   polymarket: {
-    marketSlug: process.env.POLYMARKET_SLUG || "",
-    seriesId: process.env.POLYMARKET_SERIES_ID || "10192",
-    seriesSlug: process.env.POLYMARKET_SERIES_SLUG || "btc-up-or-down-15m",
-    autoSelectLatest: (process.env.POLYMARKET_AUTO_SELECT_LATEST || "true").toLowerCase() === "true",
-    liveDataWsUrl: process.env.POLYMARKET_LIVE_WS_URL || "wss://ws-live-data.polymarket.com",
-    upOutcomeLabel: process.env.POLYMARKET_UP_LABEL || "Up",
-    downOutcomeLabel: process.env.POLYMARKET_DOWN_LABEL || "Down"
+    marketSlug: envString("POLYMARKET_SLUG", DEFAULTS.polymarket.marketSlug),
+    seriesId: envString("POLYMARKET_SERIES_ID", DEFAULTS.polymarket.seriesId),
+    seriesSlug: envString("POLYMARKET_SERIES_SLUG", DEFAULTS.polymarket.seriesSlug),
+    autoSelectLatest: envBool("POLYMARKET_AUTO_SELECT_LATEST", DEFAULTS.polymarket.autoSelectLatest),
+    liveDataWsUrl: envString("POLYMARKET_LIVE_WS_URL", DEFAULTS.polymarket.liveDataWsUrl),
+    upOutcomeLabel: envString("POLYMARKET_UP_LABEL", DEFAULTS.polymarket.upOutcomeLabel),
+    downOutcomeLabel: envString("POLYMARKET_DOWN_LABEL", DEFAULTS.polymarket.downOutcomeLabel)
   },
 
   chainlink: {
-    polygonRpcUrls: (process.env.POLYGON_RPC_URLS || "").split(",").map((s) => s.trim()).filter(Boolean),
-    polygonRpcUrl: process.env.POLYGON_RPC_URL || "https://polygon-rpc.com",
-    polygonWssUrls: (process.env.POLYGON_WSS_URLS || "").split(",").map((s) => s.trim()).filter(Boolean),
-    polygonWssUrl: process.env.POLYGON_WSS_URL || "",
-    btcUsdAggregator: process.env.CHAINLINK_BTC_USD_AGGREGATOR || "0xc907E116054Ad103354f2D350FD2514433D57F6f"
+    polygonRpcUrls: (envString("POLYGON_RPC_URLS", DEFAULTS.chainlink.polygonRpcUrls) || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+    polygonRpcUrl: envString("POLYGON_RPC_URL", DEFAULTS.chainlink.polygonRpcUrl),
+    polygonWssUrls: (envString("POLYGON_WSS_URLS", DEFAULTS.chainlink.polygonWssUrls) || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+    polygonWssUrl: envString("POLYGON_WSS_URL", DEFAULTS.chainlink.polygonWssUrl),
+    btcUsdAggregator: envString("CHAINLINK_BTC_USD_AGGREGATOR", DEFAULTS.chainlink.btcUsdAggregator)
+  },
+
+  strategy: {
+    enabled: envBool("STRATEGY_ENABLED", DEFAULTS.strategy.enabled),
+    dryRun: envBoolNeg("STRATEGY_DRY_RUN", DEFAULTS.strategy.dryRun),
+    databaseUrl: process.env.DATABASE_URL || "",
+    entryMinutesLeft: Math.max(
+      0.05,
+      Number(process.env.STRATEGY_ENTRY_MINUTES_LEFT) || DEFAULTS.strategy.entryMinutesLeft
+    ),
+    priceEpsilon: Math.max(0, Number(process.env.STRATEGY_PRICE_EPSILON) || DEFAULTS.strategy.priceEpsilon),
+    notionalUsd: Math.max(0.01, Number(process.env.STRATEGY_NOTIONAL_USD) || DEFAULTS.strategy.notionalUsd)
   }
 };
