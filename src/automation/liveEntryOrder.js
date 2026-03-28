@@ -1,4 +1,4 @@
-import { Side, OrderType } from "@polymarket/clob-client";
+import { AssetType, OrderType, Side } from "@polymarket/clob-client";
 import { CONFIG } from "../config.js";
 import { getOrCreateClobClient } from "./liveClob.js";
 import { insertLiveOrder } from "../db/postgresStrategy.js";
@@ -136,7 +136,16 @@ export async function tryPlaceLiveEntryOrder({
       line: `CLOB mercado FOK ok · order ${orderId ?? "(sem id na resposta)"}${statusHint}`
     };
   } catch (err) {
-    const msg = err?.message ?? String(err);
+    let msg = err?.message ?? String(err);
+    if (/balance|allowance|not enough/i.test(msg)) {
+      try {
+        const c = await getOrCreateClobClient();
+        const ba = await c.getBalanceAllowance({ asset_type: AssetType.COLLATERAL });
+        msg = `${msg} · collateral balance=${ba.balance} allowance=${ba.allowance}`;
+      } catch {
+        // ignora falha do diagnóstico
+      }
+    }
     try {
       await insertLiveOrder(pgClient, {
         ...rowBase,
@@ -148,7 +157,7 @@ export async function tryPlaceLiveEntryOrder({
     } catch {
       // ignore duplicate insert etc.
     }
-    return { ok: false, line: `CLOB erro: ${msg.slice(0, 120)}` };
+    return { ok: false, line: `CLOB erro: ${msg.slice(0, 220)}` };
   }
 }
 
