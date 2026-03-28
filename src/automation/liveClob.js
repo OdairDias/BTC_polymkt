@@ -1,36 +1,6 @@
-import { ClobClient, SignatureType } from "@polymarket/clob-client";
-import axios from "axios";
+import { ClobClient } from "@polymarket/clob-client";
 import { Wallet, getAddress } from "ethers";
 import { CONFIG } from "../config.js";
-
-/** id do interceptor Axios (workaround #248); só regista uma vez. */
-let polyProxyPolyAddressInterceptor = null;
-
-/**
- * Polymarket/clob-client#248: com carteira proxy (`signatureType` 1), pedidos L2 devem usar
- * `POLY_ADDRESS` = funder (proxy). O cliente oficial envia sempre a EOA → API pode responder
- * `invalid signature` no postOrder. Corrigimos no mesmo Axios que o clob-client usa.
- * @see https://github.com/Polymarket/clob-client/issues/248
- */
-function ensurePolyProxyPolyAddressHeader(funderChecksummed) {
-  if (polyProxyPolyAddressInterceptor != null) return;
-  polyProxyPolyAddressInterceptor = axios.interceptors.request.use((config) => {
-    if (!funderChecksummed) return config;
-    const headers = config.headers;
-    if (!headers) return config;
-    const apiKey =
-      typeof headers.get === "function"
-        ? headers.get("POLY_API_KEY")
-        : headers.POLY_API_KEY ?? headers["POLY_API_KEY"];
-    if (!apiKey) return config;
-    if (typeof headers.set === "function") {
-      headers.set("POLY_ADDRESS", funderChecksummed);
-    } else {
-      headers.POLY_ADDRESS = funderChecksummed;
-    }
-    return config;
-  });
-}
 
 const HEX64 = /^[0-9a-fA-F]{64}$/;
 
@@ -99,10 +69,8 @@ export async function getOrCreateClobClient() {
           );
         }
       }
-      if (CONFIG.live.signatureType === SignatureType.POLY_PROXY && funderNorm) {
-        ensurePolyProxyPolyAddressHeader(funderNorm);
-      }
-      // throwOnError=true: respostas com campo `error` passam a lançar (evita “sucesso” falso).
+      // useServerTime: timestamps L2 alinhados ao servidor (menos falhas opacas).
+      // Não forçar POLY_ADDRESS=funder: a API responde *order signer address has to be the address of the API KEY* (EOA).
       return new ClobClient(
         host,
         chainId,
@@ -111,7 +79,7 @@ export async function getOrCreateClobClient() {
         CONFIG.live.signatureType,
         funderNorm,
         undefined,
-        undefined,
+        true,
         undefined,
         undefined,
         undefined,

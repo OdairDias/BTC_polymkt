@@ -116,7 +116,7 @@ Opcional: gravar **uma decisão simulada por mercado** quando o relógio **entra
 
 ### Conta real no CLOB (preparação)
 
-Usa [`@polymarket/clob-client`](https://www.npmjs.com/package/@polymarket/clob-client): ordem **BUY mercado FOK** (`createAndPostMarketOrder`) — gasta até **`STRATEGY_NOTIONAL_USD`** em USDC com teto de preço = buy do snapshot (tick), alinhado à validação CLOB de “market buy”. Com **`POLYMARKET_SIGNATURE_TYPE=1`** (proxy), o projeto aplica o workaround do cabeçalho **`POLY_ADDRESS` = funder** ([clob-client#248](https://github.com/Polymarket/clob-client/issues/248)), senão a API pode devolver `invalid signature` mesmo com chave e perfil corretos.
+Usa [`@polymarket/clob-client`](https://www.npmjs.com/package/@polymarket/clob-client): ordem **BUY mercado FOK** (`createAndPostMarketOrder`) — gasta até **`STRATEGY_NOTIONAL_USD`** em USDC com teto de preço = buy do snapshot (tick), alinhado à validação CLOB de “market buy”. O cliente usa **`useServerTime=true`** para alinhar timestamps L2 ao servidor. O cabeçalho **`POLY_ADDRESS`** nas rotas L2 deve ser a **EOA** da API key (comportamento oficial); forçar o endereço do proxy aí faz a API responder *order signer address has to be the address of the API KEY*.
 
 **Checklist antes de ligar:**
 
