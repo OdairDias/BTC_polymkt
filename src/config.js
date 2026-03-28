@@ -103,7 +103,7 @@ export const CONFIG = {
   strategy: {
     enabled: envBool("STRATEGY_ENABLED", DEFAULTS.strategy.enabled),
     dryRun: envBoolNeg("STRATEGY_DRY_RUN", DEFAULTS.strategy.dryRun),
-    databaseUrl: process.env.DATABASE_URL || "",
+    databaseUrl: envString("DATABASE_URL", "") || envString("PUBLIC_URL_POSTGRES", ""),
     entryMinutesLeft: Math.max(
       0.05,
       Number(process.env.STRATEGY_ENTRY_MINUTES_LEFT) || DEFAULTS.strategy.entryMinutesLeft
