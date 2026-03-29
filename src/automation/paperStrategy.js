@@ -54,7 +54,14 @@ function shouldFireStrategySnapshot(marketSlug, settlementLeftMin, entryMinutesL
  * Avalia janela de 2 min (configurável) e grava no Postgres (dry run).
  * @returns {{ line: string | null, inserted?: boolean, error?: string }}
  */
-export async function runPaperStrategyTick({ poly, settlementLeftMin }) {
+export async function runPaperStrategyTick({ 
+  poly, 
+  settlementLeftMin,
+  ptbDelta,
+  rsiNow,
+  macd,
+  haNarrative
+}) {
   const s = CONFIG.strategy;
   if (!s.enabled) {
     return { line: null };
@@ -92,7 +99,11 @@ export async function runPaperStrategyTick({ poly, settlementLeftMin }) {
     entryMinutesLeft: s.entryMinutesLeft,
     upMid,
     downMid,
-    epsilon: s.priceEpsilon
+    epsilon: s.priceEpsilon,
+    ptbDelta,
+    rsiNow,
+    macd,
+    haNarrative
   });
 
   if (!decision.inWindow) {

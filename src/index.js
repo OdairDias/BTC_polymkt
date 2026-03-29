@@ -702,7 +702,14 @@ async function main() {
       let liveOrderStatusLine = null;
       let outcomeStatusLine = null;
       if (CONFIG.strategy.enabled) {
-        const st = await runPaperStrategyTick({ poly, settlementLeftMin });
+        const st = await runPaperStrategyTick({ 
+          poly, 
+          settlementLeftMin,
+          ptbDelta,
+          rsiNow,
+          macd,
+          haNarrative
+        });
         if (st?.line) strategyStatusLine = st.line;
         if (st?.liveOrderLine) liveOrderStatusLine = st.liveOrderLine;
         const ot = await runPaperOutcomeTick({ poly, settlementLeftMin });
