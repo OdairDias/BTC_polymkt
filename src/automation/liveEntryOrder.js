@@ -131,7 +131,8 @@ export async function tryPlaceLiveEntryOrder({
     const tickSize = await clob.getTickSize(String(tokenId));
     const negRisk = await clob.getNegRisk(String(tokenId));
 
-    const price0 = Number(limitPrice);
+    // Adiciona margem de slippage (5 centavos) no preço máximo para acomodar FOK
+    const price0 = Math.min(0.99, Number(limitPrice) + 0.05);
     const notional = Number(notionalUsd);
     if (!Number.isFinite(price0) || price0 <= 0 || !Number.isFinite(notional) || notional <= 0) {
       throw new Error("limitPrice ou notionalUsd inválidos para CLOB");
