@@ -163,16 +163,20 @@ export async function tryPlaceLiveEntryOrder({
       console.error("[STRATEGY_LIVE_DEBUG] createAndPostMarketOrder context:", JSON.stringify(ctxLog));
     }
 
-    // Ordem LIMIT (GTC/GTD) para ficar no book esperando o "pavio" (desconto)
+    // Ordem LIMIT (GTD) para ficar no book esperando o "pavio" (desconto)
+    // expiration em Unix seconds é obrigatório para GTD, caso contrário usa GTC sem expiração
+    const expirationSec = expiration ? Math.floor(new Date(expiration).getTime() / 1000) : 0;
+    const orderType = expirationSec > 0 ? OrderType.GTD : OrderType.GTC;
     const result = await clob.createAndPostOrder(
       {
         tokenID: String(tokenId),
         side: Side.BUY,
         price: capPrice,
         size: finalSize,
-        expiration: expiration ? Math.floor(new Date(expiration).getTime() / 1000) : undefined
+        expiration: expirationSec > 0 ? expirationSec : undefined
       },
-      { tickSize, negRisk }
+      { tickSize, negRisk },
+      orderType
     );
 
     const meta = extractOrderMeta(result);
