@@ -30,7 +30,8 @@ const DEFAULTS = {
     enabled: true,
     dryRun: true,
     liveArmed: false,
-    entryMinutesLeft: 2,
+    entryMinutesLeft: 4.5,
+    targetEntryPrice: 0.50,
     priceEpsilon: 0.001,
     notionalUsd: 1,
     outcomeLastSeconds: 5
@@ -126,6 +127,7 @@ export const CONFIG = {
       0.05,
       Number(process.env.STRATEGY_ENTRY_MINUTES_LEFT) || DEFAULTS.strategy.entryMinutesLeft
     ),
+    targetEntryPrice: Math.max(0.01, Number(process.env.STRATEGY_TARGET_PRICE) || DEFAULTS.strategy.targetEntryPrice),
     priceEpsilon: Math.max(0, Number(process.env.STRATEGY_PRICE_EPSILON) || DEFAULTS.strategy.priceEpsilon),
     notionalUsd: Math.max(0.01, Number(process.env.STRATEGY_NOTIONAL_USD) || DEFAULTS.strategy.notionalUsd),
     outcomeLastSeconds: Math.max(

@@ -68,11 +68,13 @@ function capPriceAndAmountUsd(limitPrice, notionalUsd, tickSizeStr) {
   if (!Number.isFinite(capPrice) || capPrice <= 0) {
     throw new Error(`preço limite inválido após tick (${tickSizeStr})`);
   }
+  // Notional Usd to Shares
   const amountUsd = Number(roundDownDecimals(Number(notionalUsd), 2).toFixed(2));
   if (amountUsd < 0.01) {
     throw new Error("STRATEGY_NOTIONAL_USD < 0.01 após arredondar");
   }
-  return { capPrice, amountUsd };
+  const sizeShares = Number(roundDownDecimals(amountUsd / capPrice, 2).toFixed(2));
+  return { capPrice, amountUsd, sizeShares };
 }
 
 function extractOrderMeta(result) {
@@ -114,7 +116,8 @@ export async function tryPlaceLiveEntryOrder({
   tokenId,
   limitPrice,
   sizeShares,
-  notionalUsd
+  notionalUsd,
+  expiration
 }) {
   const rowBase = {
     entry_id: entryId,
@@ -131,16 +134,17 @@ export async function tryPlaceLiveEntryOrder({
     const tickSize = await clob.getTickSize(String(tokenId));
     const negRisk = await clob.getNegRisk(String(tokenId));
 
-    // Adiciona margem de slippage (5 centavos) no preço máximo para acomodar FOK
-    const price0 = Math.min(0.99, Number(limitPrice) + 0.05);
+    // Para estratégia MAKER (entrar barato), não usamos slippage de Taker.
+    // Usamos o preço alvo exato ou o preço sugerido pelo modelo.
+    const price0 = Number(limitPrice);
     const notional = Number(notionalUsd);
     if (!Number.isFinite(price0) || price0 <= 0 || !Number.isFinite(notional) || notional <= 0) {
       throw new Error("limitPrice ou notionalUsd inválidos para CLOB");
     }
 
-    const { capPrice, amountUsd } = capPriceAndAmountUsd(price0, notional, tickSize);
+    const { capPrice, sizeShares: finalSize } = capPriceAndAmountUsd(price0, notional, tickSize);
     rowBase.limit_price = capPrice;
-    rowBase.size_shares = Number(roundDownDecimals(amountUsd / capPrice, 2).toFixed(2));
+    rowBase.size_shares = finalSize;
 
     const funderRaw = (CONFIG.live.funderAddress || "").trim();
     const ctxLog = {
@@ -159,16 +163,16 @@ export async function tryPlaceLiveEntryOrder({
       console.error("[STRATEGY_LIVE_DEBUG] createAndPostMarketOrder context:", JSON.stringify(ctxLog));
     }
 
-    const result = await clob.createAndPostMarketOrder(
+    // Ordem LIMIT (GTC/GTD) para ficar no book esperando o "pavio" (desconto)
+    const result = await clob.createAndPostOrder(
       {
         tokenID: String(tokenId),
         side: Side.BUY,
-        amount: amountUsd,
         price: capPrice,
-        orderType: OrderType.FOK
+        size: finalSize,
+        expiration: expiration ? Math.floor(new Date(expiration).getTime() / 1000) : undefined
       },
-      { tickSize, negRisk },
-      OrderType.FOK
+      { tickSize, negRisk }
     );
 
     const meta = extractOrderMeta(result);
@@ -189,7 +193,7 @@ export async function tryPlaceLiveEntryOrder({
 
     return {
       ok: true,
-      line: `CLOB mercado FOK ok · order ${orderId ?? "(sem id na resposta)"}${statusHint}`
+      line: `CLOB Limit Maker ok · price ${capPrice} · order ${orderId ?? "(sem id na resposta)"}${statusHint}`
     };
   } catch (err) {
     const explained = explainClobFailure(err);

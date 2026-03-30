@@ -116,11 +116,9 @@ export async function runPaperStrategyTick({
   try {
     let entryPrice = null;
     let simulatedShares = null;
-    if (decision.side === "UP" && upBuy != null && Number.isFinite(Number(upBuy)) && Number(upBuy) > 0) {
-      entryPrice = Number(upBuy);
-      simulatedShares = s.notionalUsd / entryPrice;
-    } else if (decision.side === "DOWN" && downBuy != null && Number.isFinite(Number(downBuy)) && Number(downBuy) > 0) {
-      entryPrice = Number(downBuy);
+    if (decision.side === "UP" || decision.side === "DOWN") {
+      // Estratégia Maker: definimos o preço de entrada alvo (ex: 0.50)
+      entryPrice = s.targetEntryPrice;
       simulatedShares = s.notionalUsd / entryPrice;
     }
 
@@ -174,7 +172,8 @@ export async function runPaperStrategyTick({
           tokenId: String(tokenId),
           limitPrice: entryPrice,
           sizeShares: Number(Number(simulatedShares).toFixed(6)),
-          notionalUsd: s.notionalUsd
+          notionalUsd: s.notionalUsd,
+          expiration: poly.market.endDate
         });
         liveOrderLine = live?.line
           ? `${live.ok ? ANSI_GREEN : ANSI_RED}${live.line}${ANSI_RESET}`
