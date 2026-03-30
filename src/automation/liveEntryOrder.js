@@ -142,7 +142,7 @@ export async function tryPlaceLiveEntryOrder({
       throw new Error("limitPrice ou notionalUsd inválidos para CLOB");
     }
 
-    const { capPrice, sizeShares: finalSize } = capPriceAndAmountUsd(price0, notional, tickSize);
+    const { capPrice, amountUsd, sizeShares: finalSize } = capPriceAndAmountUsd(price0, notional, tickSize);
     rowBase.limit_price = capPrice;
     rowBase.size_shares = finalSize;
 
