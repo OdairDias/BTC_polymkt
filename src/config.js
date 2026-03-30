@@ -33,7 +33,7 @@ const DEFAULTS = {
     entryMinutesLeft: 4.5,
     targetEntryPrice: 0.50,
     priceEpsilon: 0.001,
-    notionalUsd: 1,
+    notionalUsd: 3,
     outcomeLastSeconds: 5
   },
 
