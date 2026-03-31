@@ -30,9 +30,9 @@ const DEFAULTS = {
     enabled: true,
     dryRun: true,
     liveArmed: false,
-    entryMinutesLeft: 4.5,
-    targetEntryPrice: 0.50,
-    priceEpsilon: 0.001,
+    entryMinutesLeft: 2.5,   // analisa mais cedo, planta ordem mais tarde (60-90s = sinal mais maduro)
+    targetEntryPrice: 0.42,  // break-even em 42% win rate — edge positivo mesmo errando mais
+    priceEpsilon: 0.06,      // mínimo 6% de vantagem entre lados antes de agir
     notionalUsd: 3,
     outcomeLastSeconds: 5
   },

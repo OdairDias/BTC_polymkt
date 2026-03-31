@@ -38,9 +38,9 @@ export function decideLateWindowSide({
   const chosenSide = diff > 0 ? "UP" : "DOWN";
 
   // 1. Teto de Preço (Kelly Limit Risk/Reward)
-  // Max price to enter: 0.88 (~$0.12 of minimum profit upside per share)
-  if (chosenSide === "UP" && upMid > 0.88) return { inWindow: true, result: "SKIP_UP_TOO_EXPENSIVE", side: null, upMid, downMid };
-  if (chosenSide === "DOWN" && downMid > 0.88) return { inWindow: true, result: "SKIP_DOWN_TOO_EXPENSIVE", side: null, upMid, downMid };
+  // Max preço de mercado para entrar: 0.80 (~$0.20 de upside mínimo por share)
+  if (chosenSide === "UP" && upMid > 0.80) return { inWindow: true, result: "SKIP_UP_TOO_EXPENSIVE", side: null, upMid, downMid };
+  if (chosenSide === "DOWN" && downMid > 0.80) return { inWindow: true, result: "SKIP_DOWN_TOO_EXPENSIVE", side: null, upMid, downMid };
 
   // 2. Filtro de Segurança por "Delta Real" (Distância do Strike)
   // Requer pelo menos $5 dólares de margem de segurança na Binance vs Strike
