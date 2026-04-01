@@ -4,7 +4,7 @@ import { decideLateWindowSide } from "../strategy/lateWindow.js";
 import { getStrategyPool, ensureStrategySchemaOnce, insertPaperSignal, resetStrategySchemaFlag } from "../db/postgresStrategy.js";
 import { resetOutcomeTrailForTests } from "./paperOutcome.js";
 import { resetLiveClobClient } from "./liveClob.js";
-import { tryPlaceLiveEntryOrder, shouldAttemptLiveOrder } from "./liveEntryOrder.js";
+import { shouldAttemptLiveOrder, tryPlaceSniperFokOrder } from "./liveEntryOrder.js";
 
 const ANSI_GREEN = "\x1b[32m";
 const ANSI_YELLOW = "\x1b[33m";
@@ -17,43 +17,43 @@ let warnedNoDb = false;
 /** slug -> último minutes_left visto (para disparar só ao entrar na janela) */
 const slugMinutesLeftTrail = new Map();
 
+let sniperState = {
+  active: false,
+  marketSlug: null,
+  side: null,
+  tokenId: null,
+  limitPrice: null,
+  notionalUsd: null,
+  entryId: null
+};
+
+let lastPaperLine = null;
+let lastLiveOrderLine = null;
+
 export function resetStrategyDbStateForTests() {
   resetStrategySchemaFlag();
   resetOutcomeTrailForTests();
   resetLiveClobClient();
   warnedNoDb = false;
   slugMinutesLeftTrail.clear();
+  sniperState.active = false;
+  lastPaperLine = null;
+  lastLiveOrderLine = null;
 }
 
-/**
- * Dispara uma única vez por mercado, no momento em que o tempo cruza para ≤ entryMinutesLeft (ex.: 2 min).
- */
 function shouldFireStrategySnapshot(marketSlug, settlementLeftMin, entryMinutesLeft) {
-  if (!marketSlug || settlementLeftMin == null || !Number.isFinite(Number(settlementLeftMin))) {
-    return false;
-  }
+  if (!marketSlug || settlementLeftMin == null || !Number.isFinite(Number(settlementLeftMin))) return false;
   const t = Number(settlementLeftMin);
   const w = Number(entryMinutesLeft);
   const prev = slugMinutesLeftTrail.has(marketSlug) ? slugMinutesLeftTrail.get(marketSlug) : null;
-
-  if (t <= 0) {
+  if (t <= 0 || t > w) {
     slugMinutesLeftTrail.set(marketSlug, t);
     return false;
   }
-  if (t > w) {
-    slugMinutesLeftTrail.set(marketSlug, t);
-    return false;
-  }
-
   slugMinutesLeftTrail.set(marketSlug, t);
-  const justEntered = prev === null || prev > w;
-  return justEntered;
+  return prev === null || prev > w;
 }
 
-/**
- * Avalia janela de 2 min (configurável) e grava no Postgres (dry run).
- * @returns {{ line: string | null, inserted?: boolean, error?: string }}
- */
 export async function runPaperStrategyTick({ 
   poly, 
   settlementLeftMin,
@@ -63,9 +63,7 @@ export async function runPaperStrategyTick({
   haNarrative
 }) {
   const s = CONFIG.strategy;
-  if (!s.enabled) {
-    return { line: null };
-  }
+  if (!s.enabled) return { line: null };
   if (!s.databaseUrl) {
     if (!warnedNoDb) {
       warnedNoDb = true;
@@ -73,24 +71,60 @@ export async function runPaperStrategyTick({
     }
     return { line: null };
   }
-  if (!poly?.ok || !poly.market) {
-    return { line: null };
-  }
+  if (!poly?.ok || !poly.market) return { line: lastPaperLine, liveOrderLine: lastLiveOrderLine };
 
   const marketSlug = String(poly.market.slug ?? "");
-  if (!marketSlug) {
-    return { line: null };
+  if (!marketSlug) return { line: lastPaperLine, liveOrderLine: lastLiveOrderLine };
+
+  // --- 1. SNIPER TAPE READING CHECK ---
+  if (sniperState.active && sniperState.marketSlug === marketSlug) {
+    const askPrice = sniperState.side === "UP" ? poly.prices?.up : poly.prices?.down;
+    
+    // Status visual
+    lastLiveOrderLine = `${ANSI_YELLOW}SNIPER TAPE READING: Aguardando ${sniperState.side} @ <= ${sniperState.limitPrice.toFixed(2)} (Ask atual: ${askPrice != null ? askPrice.toFixed(3) : "-"}) ${ANSI_RESET}`;
+
+    if (askPrice != null && Number.isFinite(Number(askPrice)) && Number(askPrice) <= sniperState.limitPrice) {
+      if (shouldAttemptLiveOrder()) {
+        const pool = getStrategyPool(s.databaseUrl);
+        const client = await pool.connect();
+        try {
+          const live = await tryPlaceSniperFokOrder({
+            pgClient: client,
+            entryId: sniperState.entryId,
+            marketSlug: sniperState.marketSlug,
+            tokenId: sniperState.tokenId,
+            limitPrice: sniperState.limitPrice,
+            notionalUsd: sniperState.notionalUsd
+          });
+          lastLiveOrderLine = live?.line ? `${live.ok ? ANSI_GREEN : ANSI_RED}${live.line}${ANSI_RESET}` : null;
+          sniperState.active = false; // Disparou, finish
+        } catch (err) {
+          lastLiveOrderLine = `${ANSI_RED}SNIPER ERRO: ${err.message}${ANSI_RESET}`;
+          sniperState.active = false;
+        } finally {
+          client.release();
+        }
+      } else {
+        lastLiveOrderLine = `${ANSI_GRAY}SNIPER atingiu preco @ ${askPrice.toFixed(2)} mas Live Armed = false${ANSI_RESET}`;
+        sniperState.active = false;
+      }
+    }
+  } else if (sniperState.active && sniperState.marketSlug !== marketSlug) {
+    // Mercado mudou
+    sniperState.active = false;
+    lastLiveOrderLine = null;
+    lastPaperLine = null;
   }
 
+  // --- 2. SNAPSHOT DECISION TRIGGER ---
   if (!shouldFireStrategySnapshot(marketSlug, settlementLeftMin, s.entryMinutesLeft)) {
-    return { line: null };
+    return { line: lastPaperLine, liveOrderLine: lastLiveOrderLine };
   }
 
   const upBook = poly.orderbook?.up ?? {};
   const downBook = poly.orderbook?.down ?? {};
   const upBuy = poly.prices?.up ?? null;
   const downBuy = poly.prices?.down ?? null;
-
   const upMid = midFromBook(upBook, upBuy);
   const downMid = midFromBook(downBook, downBuy);
 
@@ -106,9 +140,7 @@ export async function runPaperStrategyTick({
     haNarrative
   });
 
-  if (!decision.inWindow) {
-    return { line: null };
-  }
+  if (!decision.inWindow) return { line: lastPaperLine, liveOrderLine: lastLiveOrderLine };
 
   const pool = getStrategyPool(s.databaseUrl);
   await ensureStrategySchemaOnce(pool);
@@ -117,7 +149,6 @@ export async function runPaperStrategyTick({
     let entryPrice = null;
     let simulatedShares = null;
     if (decision.side === "UP" || decision.side === "DOWN") {
-      // Estratégia Maker: definimos o preço de entrada alvo (ex: 0.50)
       entryPrice = s.targetEntryPrice;
       simulatedShares = s.notionalUsd / entryPrice;
     }
@@ -127,12 +158,7 @@ export async function runPaperStrategyTick({
 
     const insertResult = await insertPaperSignal(client, {
       market_slug: marketSlug,
-      condition_id:
-        poly.market.conditionId != null
-          ? String(poly.market.conditionId)
-          : poly.market.condition_id != null
-            ? String(poly.market.condition_id)
-            : null,
+      condition_id: poly.market.conditionId != null ? String(poly.market.conditionId) : poly.market.condition_id != null ? String(poly.market.condition_id) : null,
       market_end_at: marketEndAt,
       minutes_left: settlementLeftMin,
       up_mid: upMid,
@@ -151,52 +177,39 @@ export async function runPaperStrategyTick({
       dry_run: s.dryRun
     });
 
-    if (!insertResult.inserted) {
-      return { line: null, inserted: false };
-    }
+    if (!insertResult.inserted) return { line: lastPaperLine, inserted: false, liveOrderLine: lastLiveOrderLine };
 
-    let liveOrderLine = null;
-    if (
-      shouldAttemptLiveOrder() &&
-      (decision.side === "UP" || decision.side === "DOWN") &&
-      entryPrice != null &&
-      simulatedShares != null
-    ) {
-      const tokenId =
-        decision.side === "UP" ? poly.tokens?.upTokenId : poly.tokens?.downTokenId;
-      if (tokenId) {
-        const live = await tryPlaceLiveEntryOrder({
-          pgClient: client,
-          entryId: insertResult.id,
-          marketSlug,
-          tokenId: String(tokenId),
-          limitPrice: entryPrice,
-          sizeShares: Number(Number(simulatedShares).toFixed(6)),
-          notionalUsd: s.notionalUsd,
-          expiration: poly.market.endDate
-        });
-        liveOrderLine = live?.line
-          ? `${live.ok ? ANSI_GREEN : ANSI_RED}${live.line}${ANSI_RESET}`
-          : null;
-      } else {
-        liveOrderLine = `${ANSI_RED}CLOB: tokenId ausente${ANSI_RESET}`;
+    if (decision.side === "UP" || decision.side === "DOWN") {
+      if (entryPrice != null && simulatedShares != null) {
+        const tokenId = decision.side === "UP" ? poly.tokens?.upTokenId : poly.tokens?.downTokenId;
+        if (tokenId) {
+          sniperState = {
+            active: true,
+            marketSlug,
+            side: decision.side,
+            tokenId: String(tokenId),
+            limitPrice: entryPrice,
+            notionalUsd: s.notionalUsd,
+            entryId: insertResult.id
+          };
+          lastLiveOrderLine = `${ANSI_YELLOW}SNIPER TAPE READING ARMED: ${decision.side} alvo <= ${entryPrice.toFixed(2)}${ANSI_RESET}`;
+        } else {
+          lastLiveOrderLine = `${ANSI_RED}CLOB: tokenId ausente, impossivel armar Sniper${ANSI_RESET}`;
+        }
       }
+    } else {
+      lastLiveOrderLine = null;
     }
 
     const tag = s.dryRun ? "DRY" : "LIVE";
     if (decision.side === "UP" || decision.side === "DOWN") {
       const px = entryPrice != null ? entryPrice.toFixed(3) : "?";
-      return {
-        inserted: true,
-        line: `${ANSI_GREEN}Paper ${tag}: ${decision.side} @~${px} ($${s.notionalUsd})${ANSI_RESET}`,
-        liveOrderLine
-      };
+      lastPaperLine = `${ANSI_GREEN}Paper ${tag}: ${decision.side} target~${px} ($${s.notionalUsd})${ANSI_RESET}`;
+    } else {
+      lastPaperLine = `${ANSI_GRAY}Paper ${tag}: ${decision.result} (UP ${upMid?.toFixed?.(3) ?? "-"} vs DOWN ${downMid?.toFixed?.(3) ?? "-"})${ANSI_RESET}`;
     }
-    return {
-      inserted: true,
-      line: `${ANSI_GRAY}Paper ${tag}: ${decision.result} (UP ${upMid?.toFixed?.(3) ?? "-"} vs DOWN ${downMid?.toFixed?.(3) ?? "-"})${ANSI_RESET}`,
-      liveOrderLine
-    };
+
+    return { inserted: true, line: lastPaperLine, liveOrderLine: lastLiveOrderLine };
   } catch (e) {
     return { line: `${ANSI_RED}Strategy DB: ${e?.message ?? e}${ANSI_RESET}`, error: String(e?.message ?? e) };
   } finally {

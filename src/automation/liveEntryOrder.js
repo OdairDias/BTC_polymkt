@@ -249,3 +249,90 @@ export function shouldAttemptLiveOrder() {
   const pk = (CONFIG.live.privateKey || "").trim();
   return !s.dryRun && s.liveArmed && Boolean(pk);
 }
+
+/**
+ * Tenta executar FOK imediato na estratégia Sniper / Tape Reading.
+ * Usa amount = notionalUsd para apostas de valor exato (ex: $1).
+ */
+export async function tryPlaceSniperFokOrder({
+  pgClient,
+  entryId,
+  marketSlug,
+  tokenId,
+  limitPrice,
+  notionalUsd
+}) {
+  const rowBase = {
+    entry_id: entryId,
+    market_slug: marketSlug,
+    token_id: String(tokenId),
+    side: "BUY",
+    limit_price: limitPrice,
+    size_shares: null, // será calculado internamente e logado no banco, FOK do clob só precisa de amount
+    notional_usd: notionalUsd
+  };
+
+  try {
+    const clob = await getOrCreateClobClient();
+    const tickSize = await clob.getTickSize(String(tokenId));
+    const negRisk = await clob.getNegRisk(String(tokenId));
+
+    const price0 = Number(limitPrice);
+    const notional = Number(notionalUsd);
+    if (!Number.isFinite(price0) || price0 <= 0 || !Number.isFinite(notional) || notional <= 0) {
+      throw new Error("limitPrice ou notionalUsd inválidos para CLOB");
+    }
+
+    const { capPrice, amountUsd, sizeShares: finalSize } = capPriceAndAmountUsd(price0, notional, tickSize);
+    rowBase.limit_price = capPrice;
+    rowBase.size_shares = finalSize;
+
+    const funderRaw = (CONFIG.live.funderAddress || "").trim();
+    const ctxLog = { market_slug: marketSlug, amountUsd, capPrice, f: "SNIPER_FOK", funder: funderRaw ? `${funderRaw.slice(0,6)}…` : null };
+    if (LIVE_DEBUG) console.error("[STRATEGY_LIVE_DEBUG] FOK:", JSON.stringify(ctxLog));
+
+    const result = await clob.createAndPostMarketOrder(
+      {
+        tokenID: String(tokenId),
+        side: Side.BUY,
+        amount: amountUsd,
+        price: capPrice,
+        orderType: OrderType.FOK
+      },
+      { tickSize, negRisk },
+      OrderType.FOK
+    );
+
+    const meta = extractOrderMeta(result);
+    if (meta.errorMsg) throw new Error(meta.errorMsg);
+
+    const orderId = meta.orderId;
+    const statusHint = meta.status ? ` · status ${meta.status}` : "";
+
+    await insertLiveOrder(pgClient, {
+      ...rowBase,
+      clob_order_id: orderId != null ? String(orderId) : null,
+      status: "SUBMITTED",
+      error_message: null,
+      raw_response: result
+    });
+
+    return {
+      ok: true,
+      line: `CLOB SNIPER FOK ok · price ${capPrice} · amt $${amountUsd} · order ${orderId ?? "(sem id)"}${statusHint}`
+    };
+  } catch (err) {
+    const explained = explainClobFailure(err);
+    const msg = explained.line.slice(0, 400);
+    try {
+      await insertLiveOrder(pgClient, {
+        ...rowBase,
+        clob_order_id: null,
+        status: "ERROR",
+        error_message: msg.slice(0, ERR_MSG_MAX),
+        raw_response: explained.raw
+      });
+    } catch {}
+    return { ok: false, line: `CLOB Sniper erro: ${msg}` };
+  }
+}
