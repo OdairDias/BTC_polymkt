@@ -31,8 +31,8 @@ const DEFAULTS = {
     dryRun: true,
     liveArmed: false,
     databaseUrl: "",
-    entryMinutesLeft: 4.0,   // Lê a tendência macro ainda 'limpa' aos 4 min
-    targetEntryPrice: 0.20,  // Compra a oportunidade de ineficiência de mercado (Black Swan)
+    entryMinutesLeft: 1.1,   // Explosivo para 5m: Analisa aos 66s finais (pós-manipulação inicial)
+    targetEntryPrice: 0.30,  // Captura ineficiência sem perder o timing do fechamento
     priceEpsilon: 0.06,      // mínimo 6% de vantagem entre lados antes de agir
     notionalUsd: 1,          // de volta para 1 USD (via estratégia Tape Reading/FOK)
     outcomeLastSeconds: 5
