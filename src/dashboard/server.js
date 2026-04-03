@@ -52,11 +52,12 @@ export function startDashboard(port) {
               :root {
                   --bg: #0b0e11;
                   --card: #1e2329;
-                  --text: #eaecef;
+                  --text: #ffffff;
                   --primary: #f0b90b;
                   --red: #f6465d;
                   --green: #0ecb81;
                   --gray: #848e9c;
+                  --poly-blue: #3d88ff;
               }
               body {
                   font-family: 'Inter', system-ui, sans-serif;
@@ -93,10 +94,10 @@ export function startDashboard(port) {
                   box-shadow: 0 4px 12px rgba(0,0,0,0.3);
                   border: 1px solid #333;
               }
-              .card h3 { color: var(--gray); font-size: 0.9rem; margin-top: 0; cursor: default; }
-              .card .value { font-size: 2.2rem; font-weight: 700; color: var(--green); margin: 10px 0; }
+              .card h3 { color: var(--poly-blue); font-size: 0.95rem; font-weight: 500; margin-top: 0; margin-bottom: 8px; cursor: default; }
+              .card .value { font-size: 2.2rem; font-weight: 700; color: var(--green); margin: 0; }
               .card .value.small { font-size: 1.1rem; color: var(--text); white-space: normal; line-height: 1.4; }
-              .card .detail { color: var(--gray); font-size: 0.85rem; }
+              .card .detail { color: var(--gray); font-size: 0.8rem; margin-top: 5px; }
               .status-pill {
                   padding: 4px 12px;
                   border-radius: 20px;
@@ -150,13 +151,13 @@ export function startDashboard(port) {
           <div class="dashboard">
               <div class="card">
                   <h3>Portfolio</h3>
-                  <div class="value" id="portfolio">$ --.--</div>
-                  <div class="detail" id="wallet">Address: --...--</div>
+                  <div class="value" id="portfolio">--</div>
+                  <div class="detail" id="wallet">Wallet: --</div>
               </div>
               <div class="card">
-                  <h3>Cash (USDC)</h3>
-                  <div class="value" id="cash">$ --.--</div>
-                  <div class="detail">Disponível para sniping</div>
+                  <h3>Cash</h3>
+                  <div class="value" id="cash">--</div>
+                  <div class="detail">Disponível para sniping (USDC)</div>
               </div>
               <div class="card">
                   <h3>Status Atual</h3>
@@ -177,6 +178,8 @@ export function startDashboard(port) {
                 return new Intl.NumberFormat('en-US', {
                     style: 'currency',
                     currency: 'USD',
+                    minimumFractionDigits: 2,
+                    maximumFractionDigits: 2
                 }).format(val);
             }
 
