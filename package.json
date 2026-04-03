@@ -13,8 +13,10 @@
   "dependencies": {
     "@polymarket/builder-signing-sdk": "^1.0.0",
     "@polymarket/clob-client": "^5.8.1",
+    "cors": "^2.8.6",
     "dotenv": "^16.4.5",
     "ethers": "^6.11.1",
+    "express": "^5.2.1",
     "https-proxy-agent": "^7.0.6",
     "pg": "^8.13.1",
     "socks-proxy-agent": "^8.0.5",

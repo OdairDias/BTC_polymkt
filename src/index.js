@@ -30,6 +30,7 @@ import readline from "node:readline";
 import { applyGlobalProxyFromEnv } from "./net/proxy.js";
 import { runPaperStrategyTick } from "./automation/paperStrategy.js";
 import { runPaperOutcomeTick } from "./automation/paperOutcome.js";
+import { startDashboard, dashboardState } from "./dashboard/server.js";
 
 function countVwapCrosses(closes, vwapSeries, lookback) {
   if (closes.length < lookback || vwapSeries.length < lookback) return null;
@@ -462,6 +463,9 @@ async function main() {
     "recommendation"
   ];
 
+  // Inicia o dashboard na porta 9090 (Railway) ou na porta configurada
+  startDashboard(process.env.PORT || 9090);
+
   while (true) {
     const timing = getCandleWindowTiming(CONFIG.candleWindowMinutes);
 
@@ -754,6 +758,12 @@ async function main() {
       ].filter((x) => x !== null);
 
       renderScreen(lines.join("\n") + "\n");
+
+      // Atualiza o estado do Dashboard para visualização Web
+      dashboardState.activeMarket = titleLine;
+      dashboardState.timeLeft = fmtTimeLeft(timeLeftMin);
+      dashboardState.sniperArmed = strategyStatusLine?.includes("ARMED") || false;
+      dashboardState.lastSnapshotAt = new Date().toISOString();
 
       prevSpotPrice = spotPrice ?? prevSpotPrice;
       prevCurrentPrice = currentPrice ?? prevCurrentPrice;
