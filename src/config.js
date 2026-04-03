@@ -31,9 +31,9 @@ const DEFAULTS = {
     dryRun: true,
     liveArmed: false,
     databaseUrl: "",
-    entryMinutesLeft: 1.1,   // Explosivo para 5m: Analisa aos 66s finais (pós-manipulação inicial)
-    targetEntryPrice: 0.30,  // Captura ineficiência sem perder o timing do fechamento
-    priceEpsilon: 0.06,      // mínimo 6% de vantagem entre lados antes de agir
+    entryMinutesLeft: 0.75,  // 'Sniper 2.0': Analisa aos 45s finais (pico de certeza direcional)
+    targetEntryPrice: 0.20,  // Captura pânico real para retorno assimétrico de 500%
+    priceEpsilon: 0.08,      // exigência de 8% de vantagem (mais seletivo)
     notionalUsd: 1,          // de volta para 1 USD (via estratégia Tape Reading/FOK)
     outcomeLastSeconds: 5
   },
