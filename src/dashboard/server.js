@@ -12,7 +12,8 @@ export const dashboardState = {
   latestTrade: null, // latest trade outcome if found
 };
 
-export function startDashboard(port = 9090) {
+export function startDashboard(port) {
+  const finalPort = Number(port) || 9090;
   const app = express();
   app.use(cors());
   app.use(express.json());
@@ -199,8 +200,8 @@ export function startDashboard(port = 9090) {
     `);
   });
 
-  const server = app.listen(port, "0.0.0.0", () => {
-    console.log(`[DASHBOARD] Servidor rodando em http://localhost:${port}`);
+  const server = app.listen(finalPort, "0.0.0.0", () => {
+    console.log(`[DASHBOARD] Web Server rodando na porta ${finalPort}`);
   });
   
   return server;
