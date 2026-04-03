@@ -29,8 +29,8 @@ export async function getAccountStats() {
 
     return {
       address: await clob.signer.getAddress(),
-      cash,
-      portfolio: portfolioTotal,
+      cash: cash / 1e6,
+      portfolio: portfolioTotal / 1e6,
       updatedAt: new Date().toISOString()
     };
   } catch (err) {
