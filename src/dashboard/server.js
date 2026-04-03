@@ -160,6 +160,11 @@ export function startDashboard(port) {
                   <div class="detail">Disponível para sniping (USDC)</div>
               </div>
               <div class="card">
+                  <h3>Posições em Aberto</h3>
+                  <div class="value" id="positionsStatus">Inativo</div>
+                  <div class="detail" id="positionsCount">Nenhuma ordem ativa</div>
+              </div>
+              <div class="card">
                   <h3>Status Atual</h3>
                   <div class="value small" id="activeMarket">Aguardando mercado...</div>
                   <div style="margin-top:15px; display:flex; align-items:center; gap:10px;">
@@ -169,9 +174,7 @@ export function startDashboard(port) {
               </div>
           </div>
 
-          <div class="log-area" id="logs">
-              <div class="log-line">> Painel iniciado. Aguardando conexão com o robô...</div>
-          </div>
+
 
           <script>
             function formatCurrency(val) {
@@ -209,16 +212,16 @@ export function startDashboard(port) {
                         pill.className = 'status-pill active';
                     }
 
-                    if (d.timeLeft !== lastTime) {
-                        const logs = document.getElementById('logs');
-                        const line = document.createElement('div');
-                        line.className = 'log-line';
-                        line.innerHTML = '<span class="log-time">[' + d.timeLeft + ']</span> ' + d.activeMarket + ' | Balance: ' + formatCurrency(cashVal);
-                        logs.prepend(line);
-                        lastTime = d.timeLeft;
-                        
-                        // Manter apenas os últimos 50 logs para não pesar
-                        while (logs.children.length > 50) logs.lastChild.remove();
+                    const posEl = document.getElementById('positionsStatus');
+                    const hasPos = d.account?.hasOpenPositions;
+                    if (hasPos) {
+                        posEl.innerText = 'ATIVO';
+                        posEl.style.color = 'var(--poly-blue)';
+                        document.getElementById('positionsCount').innerText = d.account.openPositionsCount + ' mercado(s) em aberto';
+                    } else {
+                        posEl.innerText = 'INATIVO';
+                        posEl.style.color = 'var(--gray)';
+                        document.getElementById('positionsCount').innerText = 'Nenhuma posição ativa';
                     }
                 } catch(e) {
                     console.error('Falha no update:', e);
