@@ -40,7 +40,14 @@ CREATE TABLE IF NOT EXISTS strategy_paper_outcomes (
   down_best_bid NUMERIC,
   down_best_ask NUMERIC,
   inferred_winner TEXT,
+  official_winner TEXT,
   outcome_code TEXT NOT NULL,
+  official_resolution_status TEXT,
+  official_resolution_source TEXT,
+  official_resolved_at TIMESTAMPTZ,
+  official_outcome_prices_json JSONB,
+  official_price_to_beat NUMERIC,
+  official_price_at_close NUMERIC,
   entry_chosen_side TEXT,
   entry_correct BOOLEAN,
   pnl_simulated_usd NUMERIC,
@@ -52,6 +59,14 @@ CREATE INDEX IF NOT EXISTS idx_strategy_paper_outcomes_slug
   ON strategy_paper_outcomes (market_slug);
 CREATE INDEX IF NOT EXISTS idx_strategy_paper_outcomes_created
   ON strategy_paper_outcomes (created_at DESC);
+
+ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_winner TEXT;
+ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_resolution_status TEXT;
+ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_resolution_source TEXT;
+ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_resolved_at TIMESTAMPTZ;
+ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_outcome_prices_json JSONB;
+ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_to_beat NUMERIC;
+ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_at_close NUMERIC;
 
 -- Ordem CLOB real (uma por entrada), opcional
 CREATE TABLE IF NOT EXISTS strategy_live_orders (

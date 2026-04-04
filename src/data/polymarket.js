@@ -5,6 +5,81 @@ function toNumber(x) {
   return Number.isFinite(n) ? n : null;
 }
 
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function pickNumericField(obj, candidates) {
+  if (!obj || typeof obj !== "object") return null;
+  for (const k of candidates) {
+    if (obj[k] == null) continue;
+    const n = toNumber(obj[k]);
+    if (n !== null) return n;
+  }
+  return null;
+}
+
+function inferReferencePrices(market) {
+  const priceToBeat = pickNumericField(market, [
+    "priceToBeat",
+    "price_to_beat",
+    "strikePrice",
+    "strike_price",
+    "threshold",
+    "thresholdPrice"
+  ]);
+  const priceAtClose = pickNumericField(market, [
+    "finalPrice",
+    "final_price",
+    "closePrice",
+    "close_price",
+    "endPrice",
+    "end_price",
+    "resolvedPrice",
+    "resolved_price"
+  ]);
+
+  if (priceToBeat !== null || priceAtClose !== null) {
+    return { priceToBeat, priceAtClose };
+  }
+
+  const events = Array.isArray(market?.events) ? market.events : [];
+  for (const e of events) {
+    const p1 = pickNumericField(e, [
+      "priceToBeat",
+      "price_to_beat",
+      "strikePrice",
+      "strike_price",
+      "threshold",
+      "thresholdPrice"
+    ]);
+    const p2 = pickNumericField(e, [
+      "finalPrice",
+      "final_price",
+      "closePrice",
+      "close_price",
+      "endPrice",
+      "end_price",
+      "resolvedPrice",
+      "resolved_price"
+    ]);
+    if (p1 !== null || p2 !== null) {
+      return { priceToBeat: p1, priceAtClose: p2 };
+    }
+  }
+
+  return { priceToBeat: null, priceAtClose: null };
+}
+
 export async function fetchMarketBySlug(slug) {
   const url = new URL("/markets", CONFIG.gammaBaseUrl);
   url.searchParams.set("slug", slug);
@@ -19,6 +94,47 @@ export async function fetchMarketBySlug(slug) {
   if (!market) return null;
 
   return market;
+}
+
+export function extractResolvedOutcomeFromMarket(market, { minWinnerPrice = 0.99 } = {}) {
+  const outcomes = parseJsonArray(market?.outcomes).map((x) => String(x));
+  const outcomePrices = parseJsonArray(market?.outcomePrices).map((x) => toNumber(x));
+  const status = String(market?.umaResolutionStatus ?? "").toLowerCase();
+  const closed = Boolean(market?.closed);
+
+  let winner = null;
+  if (outcomes.length && outcomePrices.length === outcomes.length) {
+    let bestIdx = -1;
+    let bestPrice = -Infinity;
+    for (let i = 0; i < outcomePrices.length; i += 1) {
+      const p = outcomePrices[i];
+      if (p === null) continue;
+      if (p > bestPrice) {
+        bestPrice = p;
+        bestIdx = i;
+      }
+    }
+    if (bestIdx >= 0 && bestPrice >= minWinnerPrice) {
+      winner = outcomes[bestIdx] ?? null;
+    }
+  }
+
+  const resolved = status === "resolved" || (closed && winner !== null);
+  const resolvedAt = market?.closedTime ?? market?.umaEndDate ?? market?.endDate ?? null;
+  const resolutionSource = market?.resolutionSource ?? null;
+  const { priceToBeat, priceAtClose } = inferReferencePrices(market);
+
+  return {
+    resolved,
+    winner,
+    resolutionStatus: status || null,
+    resolvedAt,
+    resolutionSource,
+    outcomes,
+    outcomePrices,
+    priceToBeat,
+    priceAtClose
+  };
 }
 
 export async function fetchMarketsBySeriesSlug({ seriesSlug, limit = 50 }) {

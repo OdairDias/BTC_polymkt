@@ -65,7 +65,14 @@ export async function ensureStrategySchema(client) {
       down_best_bid NUMERIC,
       down_best_ask NUMERIC,
       inferred_winner TEXT,
+      official_winner TEXT,
       outcome_code TEXT NOT NULL,
+      official_resolution_status TEXT,
+      official_resolution_source TEXT,
+      official_resolved_at TIMESTAMPTZ,
+      official_outcome_prices_json JSONB,
+      official_price_to_beat NUMERIC,
+      official_price_at_close NUMERIC,
       entry_chosen_side TEXT,
       entry_correct BOOLEAN,
       pnl_simulated_usd NUMERIC,
@@ -95,6 +102,14 @@ export async function ensureStrategySchema(client) {
     );
     CREATE INDEX IF NOT EXISTS idx_strategy_live_orders_created
       ON strategy_live_orders (created_at DESC);
+
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_winner TEXT;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_resolution_status TEXT;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_resolution_source TEXT;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_resolved_at TIMESTAMPTZ;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_outcome_prices_json JSONB;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_to_beat NUMERIC;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_at_close NUMERIC;
   `);
 }
 
@@ -230,13 +245,37 @@ export async function findPaperEntryBySlug(client, marketSlug) {
   return res.rows[0] ?? null;
 }
 
+export async function findPendingPaperEntries(client, limit = 20) {
+  const safeLimit = Math.max(1, Math.floor(Number(limit) || 20));
+  const res = await client.query(
+    `SELECT
+       s.id,
+       s.market_slug,
+       s.chosen_side,
+       s.entry_price,
+       s.notional_usd,
+       s.market_end_at
+     FROM strategy_paper_signals s
+     LEFT JOIN strategy_paper_outcomes o ON o.entry_id = s.id
+     WHERE o.entry_id IS NULL
+       AND s.market_end_at IS NOT NULL
+       AND s.market_end_at <= NOW()
+     ORDER BY s.market_end_at ASC
+     LIMIT $1`,
+    [safeLimit]
+  );
+  return res.rows ?? [];
+}
+
 export async function insertPaperOutcome(client, row) {
   const res = await client.query(
     `INSERT INTO strategy_paper_outcomes (
       entry_id, market_slug, seconds_left_at_eval, evaluation_method,
       up_mid, down_mid, up_best_bid, up_best_ask, down_best_bid, down_best_ask,
-      inferred_winner, outcome_code, entry_chosen_side, entry_correct, pnl_simulated_usd, dry_run
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+      inferred_winner, official_winner, outcome_code, official_resolution_status, official_resolution_source,
+      official_resolved_at, official_outcome_prices_json, official_price_to_beat, official_price_at_close,
+      entry_chosen_side, entry_correct, pnl_simulated_usd, dry_run
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18,$19,$20,$21,$22,$23)
     ON CONFLICT (entry_id) DO NOTHING
     RETURNING id`,
     [
@@ -251,7 +290,14 @@ export async function insertPaperOutcome(client, row) {
       row.down_best_bid ?? null,
       row.down_best_ask ?? null,
       row.inferred_winner ?? null,
+      row.official_winner ?? null,
       row.outcome_code,
+      row.official_resolution_status ?? null,
+      row.official_resolution_source ?? null,
+      row.official_resolved_at ?? null,
+      row.official_outcome_prices_json != null ? JSON.stringify(row.official_outcome_prices_json) : null,
+      row.official_price_to_beat ?? null,
+      row.official_price_at_close ?? null,
       row.entry_chosen_side ?? null,
       row.entry_correct ?? null,
       row.pnl_simulated_usd ?? null,

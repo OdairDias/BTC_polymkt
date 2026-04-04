@@ -1,10 +1,10 @@
 import { CONFIG } from "../config.js";
-import { midFromBook } from "../strategy/pricing.js";
-import { inferMarketWinnerFromMids, computeSimulatedPnl } from "../strategy/outcomeInfer.js";
+import { computeSimulatedPnl } from "../strategy/outcomeInfer.js";
+import { fetchMarketBySlug, extractResolvedOutcomeFromMarket } from "../data/polymarket.js";
 import {
   getStrategyPool,
   ensureStrategySchemaOnce,
-  findPaperEntryBySlug,
+  findPendingPaperEntries,
   insertPaperOutcome
 } from "../db/postgresStrategy.js";
 
@@ -13,149 +13,111 @@ const ANSI_RED = "\x1b[31m";
 const ANSI_GRAY = "\x1b[90m";
 const ANSI_RESET = "\x1b[0m";
 
-/** slug -> último seconds_left visto (dispara ao entrar na janela final) */
-const outcomeSecondsTrail = new Map();
-
 export function resetOutcomeTrailForTests() {
-  outcomeSecondsTrail.clear();
+  // Mantido por compatibilidade com testes antigos.
 }
 
 /**
- * Primeira vez que o tempo cruza para ≤ lastSeconds (ex.: 5s) e > 0.
+ * Grava resultado oficial da Gamma API para entradas pendentes jÃ¡ encerradas.
+ * NÃ£o infere mais vencedor por mids nos Ãºltimos segundos.
  */
-function shouldFireOutcomeSnapshot(marketSlug, settlementLeftMin, lastSeconds) {
-  if (!marketSlug || settlementLeftMin == null || !Number.isFinite(Number(settlementLeftMin))) {
-    return false;
-  }
-  const sec = Number(settlementLeftMin) * 60;
-  const w = Number(lastSeconds);
-  const prev = outcomeSecondsTrail.has(marketSlug) ? outcomeSecondsTrail.get(marketSlug) : null;
-
-  if (sec <= 0) {
-    outcomeSecondsTrail.set(marketSlug, sec);
-    return false;
-  }
-  if (sec > w) {
-    outcomeSecondsTrail.set(marketSlug, sec);
-    return false;
-  }
-
-  outcomeSecondsTrail.set(marketSlug, sec);
-  const justEntered = prev === null || prev > w;
-  return justEntered;
-}
-
-/**
- * Grava resultado inferido (mids na janela final) ligado ao trade em strategy_paper_signals.
- */
-export async function runPaperOutcomeTick({ poly, settlementLeftMin }) {
+export async function runPaperOutcomeTick() {
   const s = CONFIG.strategy;
-  if (!s.enabled || !s.databaseUrl) {
-    return { line: null };
-  }
-  if (!poly?.ok || !poly.market) {
-    return { line: null };
-  }
-
-  const marketSlug = String(poly.market.slug ?? "");
-  if (!marketSlug) {
-    return { line: null };
-  }
-
-  const lastSec = s.outcomeLastSeconds;
-  if (!shouldFireOutcomeSnapshot(marketSlug, settlementLeftMin, lastSec)) {
-    return { line: null };
-  }
+  if (!s.enabled || !s.databaseUrl) return { line: null };
 
   const pool = getStrategyPool(s.databaseUrl);
   await ensureStrategySchemaOnce(pool);
+
   const client = await pool.connect();
   try {
-    const entry = await findPaperEntryBySlug(client, marketSlug);
-    if (!entry) {
-      return { line: null };
-    }
+    const pending = await findPendingPaperEntries(client, 30);
+    if (!pending.length) return { line: null };
 
-    const upBook = poly.orderbook?.up ?? {};
-    const downBook = poly.orderbook?.down ?? {};
-    const upBuy = poly.prices?.up ?? null;
-    const downBuy = poly.prices?.down ?? null;
+    let insertedCount = 0;
+    let lastLine = null;
 
-    const upMid = midFromBook(upBook, upBuy);
-    const downMid = midFromBook(downBook, downBuy);
+    for (const entry of pending) {
+      const marketSlug = String(entry.market_slug ?? "");
+      if (!marketSlug) continue;
 
-    const { winner, outcomeCode } = inferMarketWinnerFromMids(upMid, downMid, s.priceEpsilon);
+      let market;
+      try {
+        market = await fetchMarketBySlug(marketSlug);
+      } catch {
+        continue;
+      }
+      if (!market) continue;
 
-    const finalCode =
-      outcomeCode === "NO_DATA"
-        ? "OUTCOME_NO_DATA"
-        : outcomeCode === "TIE"
-          ? "OUTCOME_TIE"
-          : outcomeCode;
+      const resolved = extractResolvedOutcomeFromMarket(market);
+      if (!resolved.resolved || !resolved.winner) continue;
 
-    let entryCorrect = null;
-    let pnl = null;
-    const chosen = entry.chosen_side;
+      const chosen = entry.chosen_side;
+      let entryCorrect = null;
+      let pnl = null;
+      if (chosen === "UP" || chosen === "DOWN") {
+        const r = computeSimulatedPnl({
+          chosenSide: chosen,
+          winnerSide: resolved.winner,
+          entryPrice: entry.entry_price,
+          notionalUsd: entry.notional_usd
+        });
+        entryCorrect = r.entryCorrect;
+        pnl = r.pnl;
+      }
 
-    if (winner && (chosen === "UP" || chosen === "DOWN")) {
-      const r = computeSimulatedPnl({
-        chosenSide: chosen,
-        winnerSide: winner,
-        entryPrice: entry.entry_price,
-        notionalUsd: entry.notional_usd
+      const { inserted } = await insertPaperOutcome(client, {
+        entry_id: entry.id,
+        market_slug: marketSlug,
+        seconds_left_at_eval: 0,
+        evaluation_method: "gamma_resolved",
+        up_mid: null,
+        down_mid: null,
+        up_best_bid: null,
+        up_best_ask: null,
+        down_best_bid: null,
+        down_best_ask: null,
+        inferred_winner: resolved.winner,
+        official_winner: resolved.winner,
+        outcome_code: "OUTCOME_OFFICIAL",
+        official_resolution_status: resolved.resolutionStatus,
+        official_resolution_source: resolved.resolutionSource,
+        official_resolved_at: resolved.resolvedAt,
+        official_outcome_prices_json: {
+          outcomes: resolved.outcomes,
+          prices: resolved.outcomePrices
+        },
+        official_price_to_beat: resolved.priceToBeat,
+        official_price_at_close: resolved.priceAtClose,
+        entry_chosen_side: chosen,
+        entry_correct: entryCorrect,
+        pnl_simulated_usd: pnl,
+        dry_run: s.dryRun
       });
-      entryCorrect = r.entryCorrect;
-      pnl = r.pnl;
-    } else if (chosen === "UP" || chosen === "DOWN") {
-      entryCorrect = null;
-      pnl = null;
+
+      if (!inserted) continue;
+
+      insertedCount += 1;
+      const winLabel = resolved.winner ?? "?";
+      const extraPrice =
+        resolved.priceToBeat != null && resolved.priceAtClose != null
+          ? ` | beat ${Number(resolved.priceToBeat).toFixed(2)} vs close ${Number(resolved.priceAtClose).toFixed(2)}`
+          : "";
+
+      if (entryCorrect === true && pnl != null) {
+        lastLine = `${ANSI_GREEN}Outcome oficial: ${winLabel} won Â· entrada OK Â· PnL ~$${pnl.toFixed(2)}${extraPrice}${ANSI_RESET}`;
+      } else if (entryCorrect === false && pnl != null) {
+        lastLine = `${ANSI_RED}Outcome oficial: ${winLabel} won Â· entrada errou Â· PnL ~$${pnl.toFixed(2)}${extraPrice}${ANSI_RESET}`;
+      } else {
+        lastLine = `${ANSI_GRAY}Outcome oficial: ${winLabel}${extraPrice}${ANSI_RESET}`;
+      }
     }
 
-    const secondsLeft = Number(settlementLeftMin) * 60;
-
-    const { inserted } = await insertPaperOutcome(client, {
-      entry_id: entry.id,
-      market_slug: marketSlug,
-      seconds_left_at_eval: secondsLeft,
-      evaluation_method: "last_5s_mid",
-      up_mid: upMid,
-      down_mid: downMid,
-      up_best_bid: upBook.bestBid ?? null,
-      up_best_ask: upBook.bestAsk ?? null,
-      down_best_bid: downBook.bestBid ?? null,
-      down_best_ask: downBook.bestAsk ?? null,
-      inferred_winner: winner,
-      outcome_code: finalCode,
-      entry_chosen_side: chosen,
-      entry_correct: entryCorrect,
-      pnl_simulated_usd: pnl,
-      dry_run: s.dryRun
-    });
-
-    if (!inserted) {
-      return { line: null };
-    }
-
-    const winLabel = winner ?? "?";
-    if (entryCorrect === true && pnl != null) {
-      return {
-        inserted: true,
-        line: `${ANSI_GREEN}Outcome: ${winLabel} won · entrada OK · PnL ~$${pnl.toFixed(2)}${ANSI_RESET}`
-      };
-    }
-    if (entryCorrect === false && pnl != null) {
-      return {
-        inserted: true,
-        line: `${ANSI_RED}Outcome: ${winLabel} won · entrada errou · PnL ~$${pnl.toFixed(2)}${ANSI_RESET}`
-      };
-    }
-    return {
-      inserted: true,
-      line: `${ANSI_GRAY}Outcome: ${finalCode} (UP ${upMid?.toFixed?.(3) ?? "-"} / DOWN ${downMid?.toFixed?.(3) ?? "-"})${ANSI_RESET}`
-    };
+    if (insertedCount === 0) return { line: null };
+    return { inserted: true, line: lastLine ?? `${ANSI_GRAY}Outcome oficial atualizado${ANSI_RESET}` };
   } catch (e) {
     return { line: `${ANSI_RED}Outcome DB: ${e?.message ?? e}${ANSI_RESET}`, error: String(e?.message ?? e) };
   } finally {
     client.release();
   }
 }
+
