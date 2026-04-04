@@ -2,6 +2,8 @@ import express from "express";
 import cors from "cors";
 import basicAuth from "express-basic-auth";
 import { getAccountStats } from "../automation/accountInfo.js";
+import { getStrategyPool, getStrategyPerformanceReport } from "../db/postgresStrategy.js";
+import { CONFIG } from "../config.js";
 
 // Singleton to hold the bot's current status (populated from index.js)
 export const dashboardState = {
@@ -30,9 +32,20 @@ export function startDashboard(port) {
   app.get("/api/status", async (req, res) => {
     try {
       const stats = await getAccountStats();
+      let strategyMetrics = [];
+      try {
+        const pool = getStrategyPool(CONFIG.strategy.databaseUrl);
+        if (pool) {
+          strategyMetrics = await getStrategyPerformanceReport(pool);
+        }
+      } catch (poolErr) {
+        console.error("Dashboard failed to fetch strategy stats", poolErr);
+      }
+
       res.json({
           ...dashboardState,
-          account: stats
+          account: stats,
+          strategies: strategyMetrics
       });
     } catch (e) {
       res.status(500).json({ error: e.message });
@@ -140,6 +153,38 @@ export function startDashboard(port) {
                   transition: transform 0.1s;
               }
               .refresh-btn:active { transform: scale(0.95); }
+              .table-card {
+                  background: var(--card);
+                  padding: 20px;
+                  border-radius: 12px;
+                  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                  border: 1px solid #333;
+                  width: 100%;
+                  max-width: 900px;
+                  margin-top: 20px;
+                  overflow-x: auto;
+              }
+              .table-card h3 { color: var(--poly-blue); font-size: 1.1rem; font-weight: 500; margin-top: 0; margin-bottom: 15px; }
+              table {
+                  width: 100%;
+                  border-collapse: collapse;
+                  text-align: left;
+              }
+              th {
+                  color: var(--gray);
+                  font-size: 0.85rem;
+                  font-weight: 500;
+                  padding: 10px;
+                  border-bottom: 1px solid #333;
+              }
+              td {
+                  padding: 12px 10px;
+                  border-bottom: 1px solid #222;
+                  font-size: 0.95rem;
+              }
+              tr:last-child td { border-bottom: none; }
+              .pnl-pos { color: var(--green); font-weight: bold; }
+              .pnl-neg { color: var(--red); font-weight: bold; }
           </style>
       </head>
       <body>
@@ -174,7 +219,23 @@ export function startDashboard(port) {
               </div>
           </div>
 
-
+          <div class="table-card">
+              <h3>Placar das Estratégias (A/B Testing)</h3>
+              <table>
+                  <thead>
+                      <tr>
+                          <th>Estratégia</th>
+                          <th>Entradas</th>
+                          <th>Acertos</th>
+                          <th>Erros</th>
+                          <th style="text-align:right">PnL Simulado ($)</th>
+                      </tr>
+                  </thead>
+                  <tbody id="strategyTbody">
+                      <tr><td colspan="5" style="text-align:center; color:var(--gray)">Carregando...</td></tr>
+                  </tbody>
+              </table>
+          </div>
 
           <script>
             function formatCurrency(val) {
@@ -222,6 +283,26 @@ export function startDashboard(port) {
                         posEl.innerText = 'INATIVO';
                         posEl.style.color = 'var(--gray)';
                         document.getElementById('positionsCount').innerText = 'Nenhuma posição ativa';
+                    }
+
+                    const tbody = document.getElementById('strategyTbody');
+                    if (d.strategies && d.strategies.length > 0) {
+                        tbody.innerHTML = '';
+                        d.strategies.forEach(st => {
+                            const tr = document.createElement('tr');
+                            const pnlClass = st.pnl >= 0 ? 'pnl-pos' : 'pnl-neg';
+                            const pnlFmt = (st.pnl >= 0 ? '+' : '') + formatCurrency(st.pnl);
+                            tr.innerHTML = \`
+                                <td><strong style="color:var(--text)">\${st.strategy}</strong></td>
+                                <td>\${st.entries}</td>
+                                <td style="color:var(--green)">\${st.wins}</td>
+                                <td style="color:var(--red)">\${st.losses}</td>
+                                <td style="text-align:right" class="\${pnlClass}">\${pnlFmt}</td>
+                            \`;
+                            tbody.appendChild(tr);
+                        });
+                    } else {
+                        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; color:var(--gray)">Nenhum resultado registrado ainda.</td></tr>';
                     }
                 } catch(e) {
                     console.error('Falha no update:', e);

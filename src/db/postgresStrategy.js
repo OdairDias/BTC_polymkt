@@ -326,3 +326,26 @@ export async function insertPaperOutcome(client, row) {
   }
   return { inserted: false };
 }
+
+export async function getStrategyPerformanceReport(client) {
+  const res = await client.query(`
+    SELECT
+      strategy_key,
+      COUNT(*) as total_entries,
+      SUM(CASE WHEN entry_correct = true THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN entry_correct = false THEN 1 ELSE 0 END) as losses,
+      SUM(COALESCE(pnl_simulated_usd, 0)) as total_pnl
+    FROM strategy_paper_outcomes
+    WHERE entry_correct IS NOT NULL
+    GROUP BY strategy_key
+    ORDER BY total_pnl DESC
+  `);
+  
+  return res.rows.map(r => ({
+    strategy: r.strategy_key,
+    entries: Number(r.total_entries),
+    wins: Number(r.wins),
+    losses: Number(r.losses),
+    pnl: Number(r.total_pnl)
+  }));
+}
