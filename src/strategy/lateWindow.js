@@ -1,11 +1,10 @@
 /**
- * Nos últimos N minutos antes do fim:
- * Agora a decisão ignora o spread do Polymarket.
- * A decisão é pautada estritamente na distância de preço da Binance vs Strike (ptbDelta)
- * para identificar a tendência verdadeira, permitindo que a gente engatilhe 
- * oportunidades (Sniper) onde os odds do Polymarket divergirem fortemente (ex: baterem 0.20)!
+ * Decide o lado na janela final.
+ * - decisionMode=sniper_v2 (padrao atual): direcao por ptbDelta + filtros RSI/MACD/HA
+ * - decisionMode=main_2m_mid: replica a logica da main (UP vs DOWN por mid com empate por epsilon)
  */
 export function decideLateWindowSide({
+  decisionMode = "sniper_v2",
   minutesLeft,
   entryMinutesLeft,
   upMid,
@@ -17,6 +16,7 @@ export function decideLateWindowSide({
   haNarrative
 }) {
   const window = Number(entryMinutesLeft);
+  const eps = Number(epsilon) || 0;
   const t = minutesLeft;
 
   if (t === null || t === undefined || !Number.isFinite(t)) {
@@ -33,37 +33,48 @@ export function decideLateWindowSide({
     return { inWindow: true, result: "SKIP_NO_DATA", side: null, upMid, downMid };
   }
 
-  // 1. Determina a direção REAL (Binance) ignorando ilusões de preço do Polymarket.
-  // Requer pelo menos $5 dólares de margem a favor pra sentirmos firmeza na ponta.
+  const mode = String(decisionMode || "sniper_v2").toLowerCase();
+  if (mode === "main_2m_mid") {
+    const diff = upMid - downMid;
+    if (Math.abs(diff) <= eps) {
+      return { inWindow: true, result: "SKIP_TIE", side: null, upMid, downMid };
+    }
+    if (diff > 0) return { inWindow: true, result: "UP", side: "UP", upMid, downMid };
+    return { inWindow: true, result: "DOWN", side: "DOWN", upMid, downMid };
+  }
+
+  // sniper_v2
   let chosenSide = null;
   if (ptbDelta !== undefined && ptbDelta !== null && Number.isFinite(ptbDelta)) {
-      if (ptbDelta >= 5) chosenSide = "UP";
-      else if (ptbDelta <= -5) chosenSide = "DOWN";
+    if (ptbDelta >= 5) chosenSide = "UP";
+    else if (ptbDelta <= -5) chosenSide = "DOWN";
   }
 
   if (!chosenSide) {
-      return { inWindow: true, result: "SKIP_DELTA_TOO_SMALL", side: null, upMid, downMid };
+    return { inWindow: true, result: "SKIP_DELTA_TOO_SMALL", side: null, upMid, downMid };
   }
 
-  // 2. Filtro Antiexaustão (RSI)
-  // Evitar comprar UP no topo sobrecomprado (>75) ou DOWN no fundo sobrevendido (<25)
   if (rsiNow !== undefined && rsiNow !== null && Number.isFinite(rsiNow)) {
-      if (chosenSide === "UP" && rsiNow >= 75) return { inWindow: true, result: "SKIP_RSI_OVERBOUGHT", side: null, upMid, downMid };
-      if (chosenSide === "DOWN" && rsiNow <= 25) return { inWindow: true, result: "SKIP_RSI_OVERSOLD", side: null, upMid, downMid };
+    if (chosenSide === "UP" && rsiNow >= 75) {
+      return { inWindow: true, result: "SKIP_RSI_OVERBOUGHT", side: null, upMid, downMid };
+    }
+    if (chosenSide === "DOWN" && rsiNow <= 25) {
+      return { inWindow: true, result: "SKIP_RSI_OVERSOLD", side: null, upMid, downMid };
+    }
   }
 
-  // 3. Filtro Antimomento (Confluência MACD/Heiken Ashi da Binance)
   if (macd !== undefined && macd !== null && haNarrative !== undefined) {
-      const isMacdBearish = macd.hist < 0;
-      if (chosenSide === "UP" && isMacdBearish && haNarrative === "SHORT") {
-          return { inWindow: true, result: "SKIP_MOMENTUM_AGAINST_UP", side: null, upMid, downMid };
-      }
-      
-      const isMacdBullish = macd.hist > 0;
-      if (chosenSide === "DOWN" && isMacdBullish && haNarrative === "LONG") {
-          return { inWindow: true, result: "SKIP_MOMENTUM_AGAINST_DOWN", side: null, upMid, downMid };
-      }
+    const isMacdBearish = macd.hist < 0;
+    if (chosenSide === "UP" && isMacdBearish && haNarrative === "SHORT") {
+      return { inWindow: true, result: "SKIP_MOMENTUM_AGAINST_UP", side: null, upMid, downMid };
+    }
+
+    const isMacdBullish = macd.hist > 0;
+    if (chosenSide === "DOWN" && isMacdBullish && haNarrative === "LONG") {
+      return { inWindow: true, result: "SKIP_MOMENTUM_AGAINST_DOWN", side: null, upMid, downMid };
+    }
   }
 
   return { inWindow: true, result: chosenSide, side: chosenSide, upMid, downMid };
 }
+

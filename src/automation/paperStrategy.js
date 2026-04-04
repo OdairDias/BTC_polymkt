@@ -181,6 +181,7 @@ export async function runPaperStrategyTick({
       }
 
       const decision = decideLateWindowSide({
+        decisionMode: variant.decisionMode,
         minutesLeft: settlementLeftMin,
         entryMinutesLeft: variant.entryMinutesLeft,
         upMid,
@@ -200,9 +201,25 @@ export async function runPaperStrategyTick({
       }
 
       let effectiveDecision = decision;
+
+      let entryPrice = null;
+      let simulatedShares = null;
+      if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
+        const mode = String(variant.decisionMode || "sniper_v2").toLowerCase();
+        if (mode === "main_2m_mid") {
+          const sideBuy = effectiveDecision.side === "UP" ? upBuy : downBuy;
+          if (sideBuy != null && Number.isFinite(Number(sideBuy)) && Number(sideBuy) > 0) {
+            entryPrice = Number(sideBuy);
+          } else {
+            effectiveDecision = { ...effectiveDecision, side: null, result: "SKIP_NO_BUY_PRICE" };
+          }
+        } else {
+          entryPrice = variant.targetEntryPrice;
+        }
+      }
       if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
         const asym = evaluateAsymmetryGuard({
-          entryPrice: variant.targetEntryPrice,
+          entryPrice,
           maxEntryPrice: variant.maxEntryPrice,
           minPayoutMultiple: variant.minPayoutMultiple
         });
@@ -226,10 +243,7 @@ export async function runPaperStrategyTick({
         }
       }
 
-      let entryPrice = null;
-      let simulatedShares = null;
       if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
-        entryPrice = variant.targetEntryPrice;
         simulatedShares = variant.notionalUsd / entryPrice;
       }
 
@@ -299,4 +313,3 @@ export async function runPaperStrategyTick({
     client.release();
   }
 }
-

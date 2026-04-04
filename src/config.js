@@ -102,6 +102,7 @@ function mergeStrategyVariant(base, candidate) {
     key: sanitizeStrategyVariantKey(c.key, "default"),
     label: String(c.label ?? c.key ?? "default"),
     enabled: c.enabled === undefined ? true : Boolean(c.enabled),
+    decisionMode: String(c.decisionMode ?? base.decisionMode ?? "sniper_v2"),
     entryMinutesLeft: Math.max(0.05, Number(c.entryMinutesLeft ?? base.entryMinutesLeft)),
     targetEntryPrice: Math.max(0.01, Number(c.targetEntryPrice ?? base.targetEntryPrice)),
     priceEpsilon: Math.max(0, Number(c.priceEpsilon ?? base.priceEpsilon)),
@@ -223,6 +224,7 @@ const baseVariant = {
   key: "default",
   label: "default",
   enabled: true,
+  decisionMode: "sniper_v2",
   entryMinutesLeft: CONFIG.strategy.entryMinutesLeft,
   targetEntryPrice: CONFIG.strategy.targetEntryPrice,
   priceEpsilon: CONFIG.strategy.priceEpsilon,
@@ -241,9 +243,12 @@ const mergedVariants = variantsFromEnv
   .filter((v) => v.enabled);
 
 const byKey = new Map();
-for (const v of [baseVariant, ...mergedVariants]) {
+for (const v of (mergedVariants.length ? mergedVariants : [baseVariant])) {
   byKey.set(v.key, v);
 }
 
 CONFIG.strategy.variants = Array.from(byKey.values());
-CONFIG.strategy.liveStrategyKey = sanitizeStrategyVariantKey(envString("STRATEGY_LIVE_STRATEGY_KEY", "default"), "default");
+const liveKeyCandidate = sanitizeStrategyVariantKey(envString("STRATEGY_LIVE_STRATEGY_KEY", "default"), "default");
+CONFIG.strategy.liveStrategyKey = byKey.has(liveKeyCandidate)
+  ? liveKeyCandidate
+  : (CONFIG.strategy.variants[0]?.key ?? "default");
