@@ -79,6 +79,42 @@ function envBoolNeg(key, fallbackTrue) {
   return String(v).toLowerCase() !== "false";
 }
 
+function envJsonArray(key, fallback = []) {
+  const raw = process.env[key];
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function sanitizeStrategyVariantKey(value, fallback = "default") {
+  const s = String(value ?? "").trim().toLowerCase();
+  if (!s) return fallback;
+  return s.replace(/[^a-z0-9_-]/g, "").slice(0, 40) || fallback;
+}
+
+function mergeStrategyVariant(base, candidate) {
+  const c = candidate && typeof candidate === "object" ? candidate : {};
+  return {
+    key: sanitizeStrategyVariantKey(c.key, "default"),
+    label: String(c.label ?? c.key ?? "default"),
+    enabled: c.enabled === undefined ? true : Boolean(c.enabled),
+    entryMinutesLeft: Math.max(0.05, Number(c.entryMinutesLeft ?? base.entryMinutesLeft)),
+    targetEntryPrice: Math.max(0.01, Number(c.targetEntryPrice ?? base.targetEntryPrice)),
+    priceEpsilon: Math.max(0, Number(c.priceEpsilon ?? base.priceEpsilon)),
+    notionalUsd: Math.max(0.01, Number(c.notionalUsd ?? base.notionalUsd)),
+    riskGuardsEnabled: c.riskGuardsEnabled === undefined ? base.riskGuardsEnabled : Boolean(c.riskGuardsEnabled),
+    maxConsecutiveLosses: Math.max(1, Math.floor(Number(c.maxConsecutiveLosses ?? base.maxConsecutiveLosses))),
+    rollingLossHours: Math.max(1, Math.floor(Number(c.rollingLossHours ?? base.rollingLossHours))),
+    maxRollingLossUsd: Math.max(0.01, Number(c.maxRollingLossUsd ?? base.maxRollingLossUsd)),
+    minPayoutMultiple: Math.max(1, Number(c.minPayoutMultiple ?? base.minPayoutMultiple)),
+    maxEntryPrice: Math.max(0.01, Number(c.maxEntryPrice ?? base.maxEntryPrice))
+  };
+}
+
 const candleWindowFromEnv = Number(process.env.CANDLE_WINDOW_MINUTES);
 const candleWindowMinutes = Number.isFinite(candleWindowFromEnv) && candleWindowFromEnv > 0
   ? candleWindowFromEnv
@@ -182,3 +218,32 @@ export const CONFIG = {
     apiPassphrase: envString("RELAYER_API_PASSPHRASE", DEFAULTS.relayer.apiPassphrase)
   }
 };
+
+const baseVariant = {
+  key: "default",
+  label: "default",
+  enabled: true,
+  entryMinutesLeft: CONFIG.strategy.entryMinutesLeft,
+  targetEntryPrice: CONFIG.strategy.targetEntryPrice,
+  priceEpsilon: CONFIG.strategy.priceEpsilon,
+  notionalUsd: CONFIG.strategy.notionalUsd,
+  riskGuardsEnabled: CONFIG.strategy.riskGuardsEnabled,
+  maxConsecutiveLosses: CONFIG.strategy.maxConsecutiveLosses,
+  rollingLossHours: CONFIG.strategy.rollingLossHours,
+  maxRollingLossUsd: CONFIG.strategy.maxRollingLossUsd,
+  minPayoutMultiple: CONFIG.strategy.minPayoutMultiple,
+  maxEntryPrice: CONFIG.strategy.maxEntryPrice
+};
+
+const variantsFromEnv = envJsonArray("STRATEGY_VARIANTS_JSON", []);
+const mergedVariants = variantsFromEnv
+  .map((v) => mergeStrategyVariant(baseVariant, v))
+  .filter((v) => v.enabled);
+
+const byKey = new Map();
+for (const v of [baseVariant, ...mergedVariants]) {
+  byKey.set(v.key, v);
+}
+
+CONFIG.strategy.variants = Array.from(byKey.values());
+CONFIG.strategy.liveStrategyKey = sanitizeStrategyVariantKey(envString("STRATEGY_LIVE_STRATEGY_KEY", "default"), "default");

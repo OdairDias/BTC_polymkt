@@ -2,7 +2,8 @@
 CREATE TABLE IF NOT EXISTS strategy_paper_signals (
   id BIGSERIAL PRIMARY KEY,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  market_slug TEXT NOT NULL UNIQUE,
+  strategy_key TEXT NOT NULL DEFAULT 'default',
+  market_slug TEXT NOT NULL,
   condition_id TEXT,
   market_end_at TIMESTAMPTZ,
   minutes_left NUMERIC NOT NULL,
@@ -19,7 +20,8 @@ CREATE TABLE IF NOT EXISTS strategy_paper_signals (
   notional_usd NUMERIC NOT NULL DEFAULT 1,
   entry_price NUMERIC,
   simulated_shares NUMERIC,
-  dry_run BOOLEAN NOT NULL DEFAULT true
+  dry_run BOOLEAN NOT NULL DEFAULT true,
+  UNIQUE(strategy_key, market_slug)
 );
 
 CREATE INDEX IF NOT EXISTS idx_strategy_paper_signals_created
@@ -30,6 +32,7 @@ CREATE TABLE IF NOT EXISTS strategy_paper_outcomes (
   id BIGSERIAL PRIMARY KEY,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   entry_id BIGINT NOT NULL REFERENCES strategy_paper_signals(id) ON DELETE CASCADE,
+  strategy_key TEXT NOT NULL DEFAULT 'default',
   market_slug TEXT NOT NULL,
   seconds_left_at_eval NUMERIC NOT NULL,
   evaluation_method TEXT NOT NULL DEFAULT 'last_5s_mid',
@@ -67,12 +70,18 @@ ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_resolved_a
 ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_outcome_prices_json JSONB;
 ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_to_beat NUMERIC;
 ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_at_close NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE strategy_paper_signals DROP CONSTRAINT IF EXISTS strategy_paper_signals_market_slug_key;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_strategy_paper_signals_strategy_slug
+  ON strategy_paper_signals(strategy_key, market_slug);
 
 -- Ordem CLOB real (uma por entrada), opcional
 CREATE TABLE IF NOT EXISTS strategy_live_orders (
   id BIGSERIAL PRIMARY KEY,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   entry_id BIGINT NOT NULL REFERENCES strategy_paper_signals(id) ON DELETE CASCADE,
+  strategy_key TEXT NOT NULL DEFAULT 'default',
   market_slug TEXT NOT NULL,
   token_id TEXT NOT NULL,
   side TEXT NOT NULL,
@@ -88,3 +97,5 @@ CREATE TABLE IF NOT EXISTS strategy_live_orders (
 
 CREATE INDEX IF NOT EXISTS idx_strategy_live_orders_created
   ON strategy_live_orders (created_at DESC);
+
+ALTER TABLE strategy_live_orders ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';

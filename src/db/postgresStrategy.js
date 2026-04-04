@@ -29,7 +29,8 @@ export async function ensureStrategySchema(client) {
     CREATE TABLE IF NOT EXISTS strategy_paper_signals (
       id BIGSERIAL PRIMARY KEY,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-      market_slug TEXT NOT NULL UNIQUE,
+      strategy_key TEXT NOT NULL DEFAULT 'default',
+      market_slug TEXT NOT NULL,
       condition_id TEXT,
       market_end_at TIMESTAMPTZ,
       minutes_left NUMERIC NOT NULL,
@@ -46,7 +47,8 @@ export async function ensureStrategySchema(client) {
       notional_usd NUMERIC NOT NULL DEFAULT 1,
       entry_price NUMERIC,
       simulated_shares NUMERIC,
-      dry_run BOOLEAN NOT NULL DEFAULT true
+      dry_run BOOLEAN NOT NULL DEFAULT true,
+      UNIQUE(strategy_key, market_slug)
     );
     CREATE INDEX IF NOT EXISTS idx_strategy_paper_signals_created
       ON strategy_paper_signals (created_at DESC);
@@ -55,6 +57,7 @@ export async function ensureStrategySchema(client) {
       id BIGSERIAL PRIMARY KEY,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       entry_id BIGINT NOT NULL REFERENCES strategy_paper_signals(id) ON DELETE CASCADE,
+      strategy_key TEXT NOT NULL DEFAULT 'default',
       market_slug TEXT NOT NULL,
       seconds_left_at_eval NUMERIC NOT NULL,
       evaluation_method TEXT NOT NULL DEFAULT 'last_5s_mid',
@@ -88,6 +91,7 @@ export async function ensureStrategySchema(client) {
       id BIGSERIAL PRIMARY KEY,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       entry_id BIGINT NOT NULL REFERENCES strategy_paper_signals(id) ON DELETE CASCADE,
+      strategy_key TEXT NOT NULL DEFAULT 'default',
       market_slug TEXT NOT NULL,
       token_id TEXT NOT NULL,
       side TEXT NOT NULL,
@@ -110,6 +114,12 @@ export async function ensureStrategySchema(client) {
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_outcome_prices_json JSONB;
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_to_beat NUMERIC;
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_at_close NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
+    ALTER TABLE strategy_live_orders ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
+    ALTER TABLE strategy_paper_signals DROP CONSTRAINT IF EXISTS strategy_paper_signals_market_slug_key;
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_strategy_paper_signals_strategy_slug
+      ON strategy_paper_signals(strategy_key, market_slug);
   `);
 }
 
@@ -134,25 +144,28 @@ export function resetStrategySchemaFlag() {
  * EstatÃ­sticas de risco a partir de outcomes fechados.
  * Usa janela rolante (em horas) + streak de perdas consecutivas mais recentes.
  */
-export async function fetchOutcomeRiskStats(client, { rollingHours = 24, streakSampleSize = 200 } = {}) {
+export async function fetchOutcomeRiskStats(client, { strategyKey = "default", rollingHours = 24, streakSampleSize = 200 } = {}) {
   const safeRollingHours = Math.max(1, Number(rollingHours) || 24);
   const safeSample = Math.max(20, Math.floor(Number(streakSampleSize) || 200));
+  const key = String(strategyKey || "default");
 
   const rollingRes = await client.query(
     `SELECT COALESCE(SUM(pnl_simulated_usd), 0)::float8 AS rolling_pnl
      FROM strategy_paper_outcomes
      WHERE entry_correct IS NOT NULL
+       AND strategy_key = $2
        AND created_at >= NOW() - ($1::text || ' hours')::interval`,
-    [String(safeRollingHours)]
+    [String(safeRollingHours), key]
   );
 
   const streakRes = await client.query(
     `SELECT entry_correct
      FROM strategy_paper_outcomes
      WHERE entry_correct IS NOT NULL
+       AND strategy_key = $2
      ORDER BY created_at DESC
      LIMIT $1`,
-    [safeSample]
+    [safeSample, key]
   );
 
   let consecutiveLosses = 0;
@@ -177,16 +190,17 @@ export async function fetchOutcomeRiskStats(client, { rollingHours = 24, streakS
 export async function insertPaperSignal(client, row) {
   const res = await client.query(
     `INSERT INTO strategy_paper_signals (
-      market_slug, condition_id, market_end_at, minutes_left,
+      strategy_key, market_slug, condition_id, market_end_at, minutes_left,
       up_mid, down_mid, up_buy, down_buy,
       up_best_bid, up_best_ask, down_best_bid, down_best_ask,
       result_code, chosen_side, notional_usd, entry_price, simulated_shares, dry_run
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
     )
-    ON CONFLICT (market_slug) DO NOTHING
+    ON CONFLICT (strategy_key, market_slug) DO NOTHING
     RETURNING id`,
     [
+      row.strategy_key ?? "default",
       row.market_slug,
       row.condition_id ?? null,
       row.market_end_at ?? null,
@@ -216,12 +230,13 @@ export async function insertPaperSignal(client, row) {
 export async function insertLiveOrder(client, row) {
   await client.query(
     `INSERT INTO strategy_live_orders (
-      entry_id, market_slug, token_id, side, limit_price, size_shares, notional_usd,
+      entry_id, strategy_key, market_slug, token_id, side, limit_price, size_shares, notional_usd,
       clob_order_id, status, error_message, raw_response
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
     ON CONFLICT (entry_id) DO NOTHING`,
     [
       row.entry_id,
+      row.strategy_key ?? "default",
       row.market_slug,
       row.token_id,
       row.side,
@@ -238,8 +253,8 @@ export async function insertLiveOrder(client, row) {
 
 export async function findPaperEntryBySlug(client, marketSlug) {
   const res = await client.query(
-    `SELECT id, market_slug, chosen_side, entry_price, notional_usd, result_code, dry_run
-     FROM strategy_paper_signals WHERE market_slug = $1 LIMIT 1`,
+    `SELECT id, strategy_key, market_slug, chosen_side, entry_price, notional_usd, result_code, dry_run
+     FROM strategy_paper_signals WHERE market_slug = $1 ORDER BY created_at DESC LIMIT 1`,
     [marketSlug]
   );
   return res.rows[0] ?? null;
@@ -250,6 +265,7 @@ export async function findPendingPaperEntries(client, limit = 20) {
   const res = await client.query(
     `SELECT
        s.id,
+       s.strategy_key,
        s.market_slug,
        s.chosen_side,
        s.entry_price,
@@ -270,16 +286,17 @@ export async function findPendingPaperEntries(client, limit = 20) {
 export async function insertPaperOutcome(client, row) {
   const res = await client.query(
     `INSERT INTO strategy_paper_outcomes (
-      entry_id, market_slug, seconds_left_at_eval, evaluation_method,
+      entry_id, strategy_key, market_slug, seconds_left_at_eval, evaluation_method,
       up_mid, down_mid, up_best_bid, up_best_ask, down_best_bid, down_best_ask,
       inferred_winner, official_winner, outcome_code, official_resolution_status, official_resolution_source,
       official_resolved_at, official_outcome_prices_json, official_price_to_beat, official_price_at_close,
       entry_chosen_side, entry_correct, pnl_simulated_usd, dry_run
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18,$19,$20,$21,$22,$23)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23,$24)
     ON CONFLICT (entry_id) DO NOTHING
     RETURNING id`,
     [
       row.entry_id,
+      row.strategy_key ?? "default",
       row.market_slug,
       row.seconds_left_at_eval,
       row.evaluation_method ?? "last_5s_mid",

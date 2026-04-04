@@ -37,6 +37,7 @@ export async function runPaperOutcomeTick() {
     let lastLine = null;
 
     for (const entry of pending) {
+      const strategyKey = String(entry.strategy_key ?? "default");
       const marketSlug = String(entry.market_slug ?? "");
       if (!marketSlug) continue;
 
@@ -67,6 +68,7 @@ export async function runPaperOutcomeTick() {
 
       const { inserted } = await insertPaperOutcome(client, {
         entry_id: entry.id,
+        strategy_key: strategyKey,
         market_slug: marketSlug,
         seconds_left_at_eval: 0,
         evaluation_method: "gamma_resolved",
@@ -104,11 +106,11 @@ export async function runPaperOutcomeTick() {
           : "";
 
       if (entryCorrect === true && pnl != null) {
-        lastLine = `${ANSI_GREEN}Outcome oficial: ${winLabel} won Â· entrada OK Â· PnL ~$${pnl.toFixed(2)}${extraPrice}${ANSI_RESET}`;
+        lastLine = `${ANSI_GREEN}[${strategyKey}] Outcome oficial: ${winLabel} won Â· entrada OK Â· PnL ~$${pnl.toFixed(2)}${extraPrice}${ANSI_RESET}`;
       } else if (entryCorrect === false && pnl != null) {
-        lastLine = `${ANSI_RED}Outcome oficial: ${winLabel} won Â· entrada errou Â· PnL ~$${pnl.toFixed(2)}${extraPrice}${ANSI_RESET}`;
+        lastLine = `${ANSI_RED}[${strategyKey}] Outcome oficial: ${winLabel} won Â· entrada errou Â· PnL ~$${pnl.toFixed(2)}${extraPrice}${ANSI_RESET}`;
       } else {
-        lastLine = `${ANSI_GRAY}Outcome oficial: ${winLabel}${extraPrice}${ANSI_RESET}`;
+        lastLine = `${ANSI_GRAY}[${strategyKey}] Outcome oficial: ${winLabel}${extraPrice}${ANSI_RESET}`;
       }
     }
 
@@ -120,4 +122,3 @@ export async function runPaperOutcomeTick() {
     client.release();
   }
 }
-

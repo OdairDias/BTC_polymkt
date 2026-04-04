@@ -55,6 +55,7 @@ export function evaluateAsymmetryGuard({
 
 export async function evaluateRiskStatsGuard({
   pgClient,
+  strategyKey = "default",
   maxConsecutiveLosses,
   rollingLossHours,
   maxRollingLossUsd
@@ -63,7 +64,11 @@ export async function evaluateRiskStatsGuard({
   const maxLoss = Math.max(0.01, Number(maxRollingLossUsd) || 0.01);
   const hours = Math.max(1, Math.floor(Number(rollingLossHours) || 24));
 
-  const stats = await fetchOutcomeRiskStats(pgClient, { rollingHours: hours, streakSampleSize: 200 });
+  const stats = await fetchOutcomeRiskStats(pgClient, {
+    strategyKey,
+    rollingHours: hours,
+    streakSampleSize: 200
+  });
   const rollingPnl = Number(stats.rollingPnlUsd) || 0;
   const streak = Number(stats.consecutiveLosses) || 0;
 
@@ -92,4 +97,3 @@ export async function evaluateRiskStatsGuard({
     stats
   };
 }
-
