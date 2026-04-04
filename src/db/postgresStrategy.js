@@ -337,6 +337,7 @@ export async function getStrategyPerformanceReport(client) {
       SUM(COALESCE(pnl_simulated_usd, 0)) as total_pnl
     FROM strategy_paper_outcomes
     WHERE entry_correct IS NOT NULL
+      AND evaluation_method = 'gamma_resolved'
     GROUP BY strategy_key
     ORDER BY total_pnl DESC
   `);
