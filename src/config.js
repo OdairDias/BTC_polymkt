@@ -35,7 +35,13 @@ const DEFAULTS = {
     targetEntryPrice: 0.20,  // Captura pânico real para retorno assimétrico de 500%
     priceEpsilon: 0.08,      // exigência de 8% de vantagem (mais seletivo)
     notionalUsd: 1,          // de volta para 1 USD (via estratégia Tape Reading/FOK)
-    outcomeLastSeconds: 5
+    outcomeLastSeconds: 5,
+    riskGuardsEnabled: true,
+    maxConsecutiveLosses: 6,
+    rollingLossHours: 24,
+    maxRollingLossUsd: 12,
+    minPayoutMultiple: 2.5,
+    maxEntryPrice: 0.30
   },
 
   /** Execução CLOB (conta real). Chaves só via env — nunca no código. */
@@ -134,6 +140,27 @@ export const CONFIG = {
     outcomeLastSeconds: Math.max(
       1,
       Number(process.env.STRATEGY_OUTCOME_LAST_SECONDS) || DEFAULTS.strategy.outcomeLastSeconds
+    ),
+    riskGuardsEnabled: envBool("STRATEGY_RISK_GUARDS_ENABLED", DEFAULTS.strategy.riskGuardsEnabled),
+    maxConsecutiveLosses: Math.max(
+      1,
+      Math.floor(Number(process.env.STRATEGY_MAX_CONSECUTIVE_LOSSES) || DEFAULTS.strategy.maxConsecutiveLosses)
+    ),
+    rollingLossHours: Math.max(
+      1,
+      Math.floor(Number(process.env.STRATEGY_ROLLING_LOSS_HOURS) || DEFAULTS.strategy.rollingLossHours)
+    ),
+    maxRollingLossUsd: Math.max(
+      0.01,
+      Number(process.env.STRATEGY_MAX_ROLLING_LOSS_USD) || DEFAULTS.strategy.maxRollingLossUsd
+    ),
+    minPayoutMultiple: Math.max(
+      1,
+      Number(process.env.STRATEGY_MIN_PAYOUT_MULTIPLE) || DEFAULTS.strategy.minPayoutMultiple
+    ),
+    maxEntryPrice: Math.max(
+      0.01,
+      Number(process.env.STRATEGY_MAX_ENTRY_PRICE) || DEFAULTS.strategy.maxEntryPrice
     )
   },
 

@@ -5,6 +5,7 @@ import { getStrategyPool, ensureStrategySchemaOnce, insertPaperSignal, resetStra
 import { resetOutcomeTrailForTests } from "./paperOutcome.js";
 import { resetLiveClobClient } from "./liveClob.js";
 import { shouldAttemptLiveOrder, tryPlaceSniperFokOrder } from "./liveEntryOrder.js";
+import { evaluateAsymmetryGuard, evaluateRiskStatsGuard } from "./riskGuards.js";
 
 const ANSI_GREEN = "\x1b[32m";
 const ANSI_YELLOW = "\x1b[33m";
@@ -146,9 +147,38 @@ export async function runPaperStrategyTick({
   await ensureStrategySchemaOnce(pool);
   const client = await pool.connect();
   try {
+    let effectiveDecision = decision;
+    if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
+      const asym = evaluateAsymmetryGuard({
+        entryPrice: s.targetEntryPrice,
+        maxEntryPrice: s.maxEntryPrice,
+        minPayoutMultiple: s.minPayoutMultiple
+      });
+      if (!asym.allowed) {
+        effectiveDecision = { ...effectiveDecision, side: null, result: asym.resultCode };
+        lastLiveOrderLine = `${ANSI_GRAY}${asym.line}${ANSI_RESET}`;
+      }
+    }
+
+    if (
+      s.riskGuardsEnabled &&
+      (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN")
+    ) {
+      const risk = await evaluateRiskStatsGuard({
+        pgClient: client,
+        maxConsecutiveLosses: s.maxConsecutiveLosses,
+        rollingLossHours: s.rollingLossHours,
+        maxRollingLossUsd: s.maxRollingLossUsd
+      });
+      if (!risk.allowed) {
+        effectiveDecision = { ...effectiveDecision, side: null, result: risk.resultCode };
+        lastLiveOrderLine = `${ANSI_GRAY}${risk.line}${ANSI_RESET}`;
+      }
+    }
+
     let entryPrice = null;
     let simulatedShares = null;
-    if (decision.side === "UP" || decision.side === "DOWN") {
+    if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
       entryPrice = s.targetEntryPrice;
       simulatedShares = s.notionalUsd / entryPrice;
     }
@@ -169,8 +199,8 @@ export async function runPaperStrategyTick({
       up_best_ask: upBook.bestAsk ?? null,
       down_best_bid: downBook.bestBid ?? null,
       down_best_ask: downBook.bestAsk ?? null,
-      result_code: decision.result,
-      chosen_side: decision.side,
+      result_code: effectiveDecision.result,
+      chosen_side: effectiveDecision.side,
       notional_usd: s.notionalUsd,
       entry_price: entryPrice,
       simulated_shares: simulatedShares,
@@ -179,20 +209,20 @@ export async function runPaperStrategyTick({
 
     if (!insertResult.inserted) return { line: lastPaperLine, inserted: false, liveOrderLine: lastLiveOrderLine };
 
-    if (decision.side === "UP" || decision.side === "DOWN") {
+    if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
       if (entryPrice != null && simulatedShares != null) {
-        const tokenId = decision.side === "UP" ? poly.tokens?.upTokenId : poly.tokens?.downTokenId;
+        const tokenId = effectiveDecision.side === "UP" ? poly.tokens?.upTokenId : poly.tokens?.downTokenId;
         if (tokenId) {
           sniperState = {
             active: true,
             marketSlug,
-            side: decision.side,
+            side: effectiveDecision.side,
             tokenId: String(tokenId),
             limitPrice: entryPrice,
             notionalUsd: s.notionalUsd,
             entryId: insertResult.id
           };
-          lastLiveOrderLine = `${ANSI_YELLOW}SNIPER TAPE READING ARMED: ${decision.side} alvo <= ${entryPrice.toFixed(2)}${ANSI_RESET}`;
+          lastLiveOrderLine = `${ANSI_YELLOW}SNIPER TAPE READING ARMED: ${effectiveDecision.side} alvo <= ${entryPrice.toFixed(2)}${ANSI_RESET}`;
         } else {
           lastLiveOrderLine = `${ANSI_RED}CLOB: tokenId ausente, impossivel armar Sniper${ANSI_RESET}`;
         }
@@ -202,11 +232,11 @@ export async function runPaperStrategyTick({
     }
 
     const tag = s.dryRun ? "DRY" : "LIVE";
-    if (decision.side === "UP" || decision.side === "DOWN") {
+    if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
       const px = entryPrice != null ? entryPrice.toFixed(3) : "?";
-      lastPaperLine = `${ANSI_GREEN}Paper ${tag}: ${decision.side} target~${px} ($${s.notionalUsd})${ANSI_RESET}`;
+      lastPaperLine = `${ANSI_GREEN}Paper ${tag}: ${effectiveDecision.side} target~${px} ($${s.notionalUsd})${ANSI_RESET}`;
     } else {
-      lastPaperLine = `${ANSI_GRAY}Paper ${tag}: ${decision.result} (UP ${upMid?.toFixed?.(3) ?? "-"} vs DOWN ${downMid?.toFixed?.(3) ?? "-"})${ANSI_RESET}`;
+      lastPaperLine = `${ANSI_GRAY}Paper ${tag}: ${effectiveDecision.result} (UP ${upMid?.toFixed?.(3) ?? "-"} vs DOWN ${downMid?.toFixed?.(3) ?? "-"})${ANSI_RESET}`;
     }
 
     return { inserted: true, line: lastPaperLine, liveOrderLine: lastLiveOrderLine };

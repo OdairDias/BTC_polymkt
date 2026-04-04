@@ -116,6 +116,47 @@ export function resetStrategySchemaFlag() {
 }
 
 /**
+ * EstatÃ­sticas de risco a partir de outcomes fechados.
+ * Usa janela rolante (em horas) + streak de perdas consecutivas mais recentes.
+ */
+export async function fetchOutcomeRiskStats(client, { rollingHours = 24, streakSampleSize = 200 } = {}) {
+  const safeRollingHours = Math.max(1, Number(rollingHours) || 24);
+  const safeSample = Math.max(20, Math.floor(Number(streakSampleSize) || 200));
+
+  const rollingRes = await client.query(
+    `SELECT COALESCE(SUM(pnl_simulated_usd), 0)::float8 AS rolling_pnl
+     FROM strategy_paper_outcomes
+     WHERE entry_correct IS NOT NULL
+       AND created_at >= NOW() - ($1::text || ' hours')::interval`,
+    [String(safeRollingHours)]
+  );
+
+  const streakRes = await client.query(
+    `SELECT entry_correct
+     FROM strategy_paper_outcomes
+     WHERE entry_correct IS NOT NULL
+     ORDER BY created_at DESC
+     LIMIT $1`,
+    [safeSample]
+  );
+
+  let consecutiveLosses = 0;
+  for (const row of streakRes.rows) {
+    if (row.entry_correct === false) {
+      consecutiveLosses += 1;
+      continue;
+    }
+    break;
+  }
+
+  return {
+    rollingPnlUsd: Number(rollingRes.rows?.[0]?.rolling_pnl ?? 0),
+    consecutiveLosses,
+    observedOutcomes: streakRes.rowCount
+  };
+}
+
+/**
  * Uma linha por mercado (UNIQUE market_slug). Retorna { inserted: boolean, id? }
  */
 export async function insertPaperSignal(client, row) {
