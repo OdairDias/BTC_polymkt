@@ -16,20 +16,22 @@ Variante Sniper conservadora: mais cautelosa que perfis agressivos.
 - Alvo tipico: `targetEntryPrice=0.25`
 - Tamanho tipico: `notionalUsd=0.75`
 
-## O que ela faz (passo a passo)
+## O que ela faz (passo a passo detalhado)
 
-Mesma familia da `sniper_45s`:
+Mesma base técnica da família Sniper, mas com um perfil mais "flexível" para garantir a entrada e suavizar drawdowns:
 
-- gate direcional por `ptbDelta`
-- filtros de contradicao RSI e MACD/Heiken
-- usa ancora de entrada por `targetEntryPrice`
-
-Na pratica:
-
-1. Espera o mercado entrar na janela final (por volta de 54s).
-2. Decide `UP`/`DOWN` via `ptbDelta` e filtra por RSI + MACD/Heiken.
-3. Se passar, tenta entrar com `targetEntryPrice=0.25` (menos assimetrico que `0.20`, mas tende a executar com mais frequencia).
-4. Aplica guardas de risco e assimetria antes de registrar/operar.
+1. **Gatilho de Tempo Antecipado:** Ao invés de esperar o pânico final dos 45 segundos, o robô entra em ação quando faltam **54 segundos (0.9 min)** para o fim do candle. Ele tenta pescar a tendência antes dela explodir.
+2. **Análise Direcional Principal (Delta / T.A.):** 
+   A direção do mercado é decidida comparando o preço *Spot* do Bitcoin na Binance com o preço base (*Price To Beat*).
+   - **`UP` (Comprar):** `ptbDelta >= +5`
+   - **`DOWN` (Vender):** `ptbDelta <= -5`
+3. **Filtros de Segurança (Análise Técnica Evita "Falso Rompimento"):**
+   Mesmo sendo "Safe", a estratégia se recusa a entrar em exaustões de mercado.
+   - **RSI:** Bloqueia compras (`UP`) em RSI $\ge$ 75 (topo eufórico) e vendas (`DOWN`) em RSI $\le$ 25 (fundo de pânico).
+   - **MACD + Heiken Ashi:** Bloqueia apostas contra o *momentum*. Se o mercado estruturalmente cai forte (Heiken Ashi de queda + MACD cruzando pra baixo), ignoramos sinais passageiros isolados de UP.
+4. **Entrada FOK Ancorada (Menos Assimétrica):**
+   A grande diferença para a Sniper padrão. Aqui, estabelecemos o **preço-alvo de 0.25** em vez de 0.20. Ao aceitar pagar até 25 centavos por contrato, nós "sacrificamos" um pouco do lucro máximo potencial em troca de uma **taxa de sucesso de execução (Fill Rate) consideravelmente mais alta**.
+5. **Aprovação Final (Risk Guard):** Todo sinal passa pelo gerenciador de risco (Drawdown e limites de loss). Além disso, o `notionalUsd` padrão é rebaixado (ex: $0.75) para que eventuais stops machuquem menos o portfólio no longo prazo.
 
 ## Por que "safe"
 
