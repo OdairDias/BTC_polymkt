@@ -1,3 +1,5 @@
+import { STRATEGY_VARIANTS } from "./strategy/variants.js";
+
 /**
  * Valores padrão da aplicação (BTC 5m + estratégia paper).
  * Railway / `.env` podem sobrescrever qualquer chave via process.env.
@@ -220,6 +222,8 @@ export const CONFIG = {
   }
 };
 
+// Variantes carregadas do arquivo de código (versionado no Git).
+// Para alterar parâmetros, edite src/strategy/variants.js — sem risco de JSON mal-formatado no Railway.
 const baseVariant = {
   key: "default",
   label: "default",
@@ -237,18 +241,27 @@ const baseVariant = {
   maxEntryPrice: CONFIG.strategy.maxEntryPrice
 };
 
+// Usa as variantes hardcoded em variants.js como fonte primária.
+// Se STRATEGY_VARIANTS_JSON estiver definido no Railway, ele SOBRESCREVE (override pontual).
 const variantsFromEnv = envJsonArray("STRATEGY_VARIANTS_JSON", []);
-const mergedVariants = variantsFromEnv
-  .map((v) => mergeStrategyVariant(baseVariant, v))
-  .filter((v) => v.enabled);
+const codeVariants = Array.isArray(STRATEGY_VARIANTS) ? STRATEGY_VARIANTS.filter(v => v.enabled !== false) : [];
 
 const byKey = new Map();
-for (const v of (mergedVariants.length ? mergedVariants : [baseVariant])) {
-  byKey.set(v.key, v);
+// 1. Carrega as variantes do código primeiro
+for (const v of codeVariants) {
+  byKey.set(v.key, mergeStrategyVariant(baseVariant, v));
+}
+// 2. Se houver override no env, ele sobrescreve a variante de mesmo key
+for (const v of variantsFromEnv) {
+  byKey.set(sanitizeStrategyVariantKey(v.key, "override"), mergeStrategyVariant(baseVariant, v));
+}
+// 3. Se não tiver nenhuma variante de nenhum lado, usa o default antigo
+if (byKey.size === 0) {
+  byKey.set("default", baseVariant);
 }
 
-CONFIG.strategy.variants = Array.from(byKey.values());
-const liveKeyCandidate = sanitizeStrategyVariantKey(envString("STRATEGY_LIVE_STRATEGY_KEY", "default"), "default");
+CONFIG.strategy.variants = Array.from(byKey.values()).filter(v => v.enabled !== false);
+const liveKeyCandidate = sanitizeStrategyVariantKey(envString("STRATEGY_LIVE_STRATEGY_KEY", "sniper_45s"), "sniper_45s");
 CONFIG.strategy.liveStrategyKey = byKey.has(liveKeyCandidate)
   ? liveKeyCandidate
-  : (CONFIG.strategy.variants[0]?.key ?? "default");
+  : (CONFIG.strategy.variants[0]?.key ?? "sniper_45s");
