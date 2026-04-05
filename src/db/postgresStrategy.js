@@ -276,7 +276,8 @@ export async function findPendingPaperEntries(client, limit = 20) {
      WHERE o.entry_id IS NULL
        AND s.market_end_at IS NOT NULL
        AND s.market_end_at <= NOW()
-     ORDER BY s.market_end_at ASC
+       AND s.market_end_at >= NOW() - interval '48 hours'
+     ORDER BY s.market_end_at DESC
      LIMIT $1`,
     [safeLimit]
   );
