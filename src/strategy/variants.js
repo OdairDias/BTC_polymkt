@@ -29,9 +29,9 @@ export const STRATEGY_VARIANTS = [
     priceEpsilon: 0.08,
     notionalUsd: 1.0,
     riskGuardsEnabled: true,
-    maxConsecutiveLosses: 6,
+    maxConsecutiveLosses: 10,      // aumentado: dados antigos estimados nao devem frear o bot
     rollingLossHours: 24,
-    maxRollingLossUsd: 12,
+    maxRollingLossUsd: 20,         // ampliado para nao travar em dados sujos do passado
     minPayoutMultiple: 2.5,
     maxEntryPrice: 0.30
   },
@@ -43,11 +43,11 @@ export const STRATEGY_VARIANTS = [
     entryMinutesLeft: 0.90,        // age nos últimos 54 segundos
     targetEntryPrice: 0.25,        // fill rate mais alto, payout ~4x
     priceEpsilon: 0.08,
-    notionalUsd: 0.75,             // mão menor para suavizar drawdown
+    notionalUsd: 0.75,             // mao menor para suavizar drawdown
     riskGuardsEnabled: true,
-    maxConsecutiveLosses: 6,
+    maxConsecutiveLosses: 10,
     rollingLossHours: 24,
-    maxRollingLossUsd: 10,
+    maxRollingLossUsd: 20,
     minPayoutMultiple: 2.0,
     maxEntryPrice: 0.35
   },
@@ -61,9 +61,9 @@ export const STRATEGY_VARIANTS = [
     priceEpsilon: 0.06,
     notionalUsd: 1.0,
     riskGuardsEnabled: true,
-    maxConsecutiveLosses: 6,
+    maxConsecutiveLosses: 10,
     rollingLossHours: 24,
-    maxRollingLossUsd: 12,
+    maxRollingLossUsd: 20,
     minPayoutMultiple: 2.5,
     maxEntryPrice: 0.28
   },
@@ -77,10 +77,10 @@ export const STRATEGY_VARIANTS = [
     priceEpsilon: 0.001,           // empate apenas se diferença < 0.1%
     notionalUsd: 1.0,
     riskGuardsEnabled: true,
-    maxConsecutiveLosses: 6,
+    maxConsecutiveLosses: 10,
     rollingLossHours: 24,
-    maxRollingLossUsd: 12,
+    maxRollingLossUsd: 20,
     minPayoutMultiple: 1.0,        // baseline: aceita qualquer payout > 1x
-    maxEntryPrice: 0.99            // baseline: não bloqueia por preço
+    maxEntryPrice: 0.99            // baseline: nao bloqueia por preco
   }
 ];
