@@ -82,5 +82,79 @@ export const STRATEGY_VARIANTS = [
     maxRollingLossUsd: 9999,
     minPayoutMultiple: 1.0,        // baseline: aceita qualquer payout > 1x
     maxEntryPrice: 0.99            // baseline: nao bloqueia por preco
+  },
+
+  // ─── Estratégias Contrárias ───────────────────────────────────────────────
+  // Entram na ponta OPOSTA ao que o modelo recomienda.
+  // Objetivo: descobrir se o modelo tem viés sistemático (e se sim, apostamos contra).
+  // Preço de entrada usa sempre o preço real do livro (não âncora). Guards de
+  // assimetria estão liberados pois a ponta cara naturalmente tem payout < 2x.
+  {
+    key: "sniper_45s_contra",
+    label: "Sniper 45s CONTRA (Contrária)",
+    enabled: true,
+    decisionMode: "sniper_v2",
+    contrarian: true,                  // inverte UP↔DOWN após a decisão
+    entryMinutesLeft: 0.75,            // mesmo timing que sniper_45s
+    targetEntryPrice: 0.20,            // não usado — contrarian usa preço real do livro
+    priceEpsilon: 0.08,
+    notionalUsd: 1.0,
+    riskGuardsEnabled: true,
+    maxConsecutiveLosses: 999,
+    rollingLossHours: 24,
+    maxRollingLossUsd: 9999,
+    minPayoutMultiple: 1.0,            // liberado: ponta contrária pode pagar só 1.2x
+    maxEntryPrice: 0.99               // liberado: ponta contrária pode custar até 0.99
+  },
+  {
+    key: "safe_90s_contra",
+    label: "Safe 90s CONTRA (Contrária)",
+    enabled: true,
+    decisionMode: "sniper_v2",
+    contrarian: true,
+    entryMinutesLeft: 0.90,            // mesmo timing que safe_90s
+    targetEntryPrice: 0.25,            // não usado — contrarian usa preço real do livro
+    priceEpsilon: 0.08,
+    notionalUsd: 0.75,
+    riskGuardsEnabled: true,
+    maxConsecutiveLosses: 999,
+    rollingLossHours: 24,
+    maxRollingLossUsd: 9999,
+    minPayoutMultiple: 1.0,
+    maxEntryPrice: 0.99
+  },
+  {
+    key: "aggr_35s_contra",
+    label: "Aggressive 35s CONTRA (Contrária)",
+    enabled: true,
+    decisionMode: "sniper_v2",
+    contrarian: true,
+    entryMinutesLeft: 0.58,            // mesmo timing que aggr_35s
+    targetEntryPrice: 0.18,            // não usado — contrarian usa preço real do livro
+    priceEpsilon: 0.06,
+    notionalUsd: 1.0,
+    riskGuardsEnabled: true,
+    maxConsecutiveLosses: 999,
+    rollingLossHours: 24,
+    maxRollingLossUsd: 9999,
+    minPayoutMultiple: 1.0,
+    maxEntryPrice: 0.99
+  },
+  {
+    key: "main_2m_contra",
+    label: "Main 2m CONTRA (Contrária)",
+    enabled: true,
+    decisionMode: "main_2m_mid",      // mesma lógica de decisão que main_2m
+    contrarian: true,
+    entryMinutesLeft: 2.0,
+    targetEntryPrice: 0.50,            // não usado — contrarian usa preço real do livro
+    priceEpsilon: 0.001,
+    notionalUsd: 1.0,
+    riskGuardsEnabled: true,
+    maxConsecutiveLosses: 999,
+    rollingLossHours: 24,
+    maxRollingLossUsd: 9999,
+    minPayoutMultiple: 1.0,
+    maxEntryPrice: 0.99
   }
 ];

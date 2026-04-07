@@ -105,6 +105,7 @@ function mergeStrategyVariant(base, candidate) {
     label: String(c.label ?? c.key ?? "default"),
     enabled: c.enabled === undefined ? true : Boolean(c.enabled),
     decisionMode: String(c.decisionMode ?? base.decisionMode ?? "sniper_v2"),
+    contrarian: c.contrarian === undefined ? false : Boolean(c.contrarian),
     entryMinutesLeft: Math.max(0.05, Number(c.entryMinutesLeft ?? base.entryMinutesLeft)),
     targetEntryPrice: Math.max(0.01, Number(c.targetEntryPrice ?? base.targetEntryPrice)),
     priceEpsilon: Math.max(0, Number(c.priceEpsilon ?? base.priceEpsilon)),

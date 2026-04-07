@@ -202,11 +202,25 @@ export async function runPaperStrategyTick({
 
       let effectiveDecision = decision;
 
+      // ── Lógica CONTRÁRIA: inverte a ponta após a decisão original ──────────
+      // Se a variante é contrarian, entramos no lado oposto ao que o modelo recomenda.
+      // Isso garante que o timing e sinal base são idênticos à estratégia original,
+      // mas a aposta é na ponta contrária (para descobrir viés sistemático do modelo).
+      if (variant.contrarian && (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN")) {
+        const flippedSide = effectiveDecision.side === "UP" ? "DOWN" : "UP";
+        effectiveDecision = {
+          ...effectiveDecision,
+          side: flippedSide,
+          result: `CONTRA_${effectiveDecision.result ?? effectiveDecision.side}`
+        };
+      }
+
       let entryPrice = null;
       let simulatedShares = null;
       if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
-        const mode = String(variant.decisionMode || "sniper_v2").toLowerCase();
-        if (mode === "main_2m_mid") {
+        if (variant.contrarian) {
+          // Contrarian usa SEMPRE o preço real do livro da ponta que entrou
+          // (pois a ponta cara não tem âncora fixa — dependemos do book ao vivo)
           const sideBuy = effectiveDecision.side === "UP" ? upBuy : downBuy;
           if (sideBuy != null && Number.isFinite(Number(sideBuy)) && Number(sideBuy) > 0) {
             entryPrice = Number(sideBuy);
@@ -214,7 +228,17 @@ export async function runPaperStrategyTick({
             effectiveDecision = { ...effectiveDecision, side: null, result: "SKIP_NO_BUY_PRICE" };
           }
         } else {
-          entryPrice = variant.targetEntryPrice;
+          const mode = String(variant.decisionMode || "sniper_v2").toLowerCase();
+          if (mode === "main_2m_mid") {
+            const sideBuy = effectiveDecision.side === "UP" ? upBuy : downBuy;
+            if (sideBuy != null && Number.isFinite(Number(sideBuy)) && Number(sideBuy) > 0) {
+              entryPrice = Number(sideBuy);
+            } else {
+              effectiveDecision = { ...effectiveDecision, side: null, result: "SKIP_NO_BUY_PRICE" };
+            }
+          } else {
+            entryPrice = variant.targetEntryPrice;
+          }
         }
       }
       if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
