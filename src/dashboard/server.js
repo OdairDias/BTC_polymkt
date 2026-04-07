@@ -20,6 +20,12 @@ export function startDashboard(port) {
   const app = express();
   app.use(cors());
   app.use(express.json());
+  const activeStrategyKeys = new Set(
+    (Array.isArray(CONFIG.strategy.variants) ? CONFIG.strategy.variants : [])
+      .filter((variant) => variant && variant.enabled !== false)
+      .map((variant) => String(variant.key || "").trim())
+      .filter(Boolean)
+  );
 
   // Autenticação Básica
   app.use(basicAuth({
@@ -37,6 +43,9 @@ export function startDashboard(port) {
         const pool = getStrategyPool(CONFIG.strategy.databaseUrl);
         if (pool) {
           strategyMetrics = await getStrategyPerformanceReport(pool);
+          if (activeStrategyKeys.size > 0) {
+            strategyMetrics = strategyMetrics.filter((metric) => activeStrategyKeys.has(metric.strategy));
+          }
         }
       } catch (poolErr) {
         console.error("Dashboard failed to fetch strategy stats", poolErr);
