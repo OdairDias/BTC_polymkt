@@ -227,6 +227,43 @@ export async function insertPaperSignal(client, row) {
   return { inserted: false };
 }
 
+export async function updatePaperSignalExecution(client, row) {
+  const res = await client.query(
+    `UPDATE strategy_paper_signals
+     SET
+       result_code = COALESCE($2, result_code),
+       chosen_side = $3,
+       entry_price = $4,
+       simulated_shares = $5,
+       up_buy = COALESCE($6, up_buy),
+       down_buy = COALESCE($7, down_buy),
+       up_mid = COALESCE($8, up_mid),
+       down_mid = COALESCE($9, down_mid),
+       up_best_bid = COALESCE($10, up_best_bid),
+       up_best_ask = COALESCE($11, up_best_ask),
+       down_best_bid = COALESCE($12, down_best_bid),
+       down_best_ask = COALESCE($13, down_best_ask)
+     WHERE id = $1
+     RETURNING id`,
+    [
+      row.id,
+      row.result_code ?? null,
+      row.chosen_side ?? null,
+      row.entry_price ?? null,
+      row.simulated_shares ?? null,
+      row.up_buy ?? null,
+      row.down_buy ?? null,
+      row.up_mid ?? null,
+      row.down_mid ?? null,
+      row.up_best_bid ?? null,
+      row.up_best_ask ?? null,
+      row.down_best_bid ?? null,
+      row.down_best_ask ?? null
+    ]
+  );
+  return { updated: res.rowCount > 0 };
+}
+
 export async function insertLiveOrder(client, row) {
   await client.query(
     `INSERT INTO strategy_live_orders (

@@ -1,7 +1,7 @@
 import { CONFIG } from "../config.js";
 import { midFromBook } from "../strategy/pricing.js";
 import { decideLateWindowSide } from "../strategy/lateWindow.js";
-import { getStrategyPool, ensureStrategySchemaOnce, insertPaperSignal, resetStrategySchemaFlag } from "../db/postgresStrategy.js";
+import { getStrategyPool, ensureStrategySchemaOnce, insertPaperSignal, resetStrategySchemaFlag, updatePaperSignalExecution } from "../db/postgresStrategy.js";
 import { resetOutcomeTrailForTests } from "./paperOutcome.js";
 import { resetLiveClobClient } from "./liveClob.js";
 import { shouldAttemptLiveOrder, tryPlaceSniperFokOrder } from "./liveEntryOrder.js";
@@ -51,6 +51,11 @@ function defaultSniperState() {
     notionalUsd: null,
     entryId: null
   };
+}
+
+function isAnchoredSniperVariant(variant) {
+  const mode = String(variant?.decisionMode || "sniper_v2").toLowerCase();
+  return !variant?.contrarian && mode === "sniper_v2";
 }
 
 function shouldFireStrategySnapshot(trailMap, marketSlug, settlementLeftMin, entryMinutesLeft) {
@@ -145,6 +150,25 @@ export async function runPaperStrategyTick({
         localLiveLine = `${ANSI_YELLOW}SNIPER: wait ${sniperState.side} @ <= ${sniperState.limitPrice.toFixed(2)} (ask ${askPrice != null ? askPrice.toFixed(3) : "-"})${ANSI_RESET}`;
 
         if (askPrice != null && Number.isFinite(Number(askPrice)) && Number(askPrice) <= sniperState.limitPrice) {
+          const touchedEntryPrice = sniperState.limitPrice;
+          const touchedShares = sniperState.notionalUsd / touchedEntryPrice;
+          if (sniperState.entryId != null) {
+            await updatePaperSignalExecution(client, {
+              id: sniperState.entryId,
+              result_code: sniperState.side,
+              chosen_side: sniperState.side,
+              entry_price: touchedEntryPrice,
+              simulated_shares: touchedShares,
+              up_buy: upBuy,
+              down_buy: downBuy,
+              up_mid: upMid,
+              down_mid: downMid,
+              up_best_bid: upBook.bestBid ?? null,
+              up_best_ask: upBook.bestAsk ?? null,
+              down_best_bid: downBook.bestBid ?? null,
+              down_best_ask: downBook.bestAsk ?? null
+            });
+          }
           const canLiveTrade = shouldAttemptLiveOrder() && key === CONFIG.strategy.liveStrategyKey;
           if (canLiveTrade) {
             try {
@@ -163,14 +187,24 @@ export async function runPaperStrategyTick({
           } else if (shouldAttemptLiveOrder() && key !== CONFIG.strategy.liveStrategyKey) {
             localLiveLine = `${ANSI_GRAY}Live bloqueado para '${key}' (primary=${CONFIG.strategy.liveStrategyKey})${ANSI_RESET}`;
           } else {
-            localLiveLine = `${ANSI_GRAY}SNIPER tocou preco, modo dry/no-live${ANSI_RESET}`;
+            localLiveLine = `${ANSI_GRAY}SNIPER tocou preco, paper filled @ ${touchedEntryPrice.toFixed(2)}${ANSI_RESET}`;
           }
+          localPaperLine = `${ANSI_GREEN}${s.dryRun ? "DRY" : "LIVE"} ${sniperState.side} @${touchedEntryPrice.toFixed(3)} ($${sniperState.notionalUsd})${ANSI_RESET}`;
           sniperState.active = false;
         }
       } else if (sniperState.active && sniperState.marketSlug !== marketSlug) {
+        if (sniperState.entryId != null) {
+          await updatePaperSignalExecution(client, {
+            id: sniperState.entryId,
+            result_code: "NO_FILL",
+            chosen_side: null,
+            entry_price: null,
+            simulated_shares: null
+          });
+        }
         sniperState.active = false;
         localLiveLine = null;
-        localPaperLine = null;
+        localPaperLine = `${ANSI_GRAY}${s.dryRun ? "DRY" : "LIVE"} NO_FILL${ANSI_RESET}`;
       }
 
       if (!shouldFireStrategySnapshot(trail, marketSlug, settlementLeftMin, variant.entryMinutesLeft)) {
@@ -215,6 +249,7 @@ export async function runPaperStrategyTick({
         };
       }
 
+      const anchoredSniper = isAnchoredSniperVariant(variant);
       let entryPrice = null;
       let simulatedShares = null;
       if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
@@ -267,12 +302,19 @@ export async function runPaperStrategyTick({
         }
       }
 
-      if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
+      if ((effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") && !anchoredSniper) {
         simulatedShares = variant.notionalUsd / entryPrice;
       }
 
       const endDate = poly.market.endDate ? new Date(poly.market.endDate) : null;
       const marketEndAt = endDate && !Number.isNaN(endDate.getTime()) ? endDate.toISOString() : null;
+
+      const paperResultCode = anchoredSniper && (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN")
+        ? `ARMED_${effectiveDecision.side}`
+        : effectiveDecision.result;
+      const paperChosenSide = anchoredSniper ? null : effectiveDecision.side;
+      const paperEntryPrice = anchoredSniper ? null : entryPrice;
+      const paperSimulatedShares = anchoredSniper ? null : simulatedShares;
 
       const insertResult = await insertPaperSignal(client, {
         strategy_key: key,
@@ -288,15 +330,15 @@ export async function runPaperStrategyTick({
         up_best_ask: upBook.bestAsk ?? null,
         down_best_bid: downBook.bestBid ?? null,
         down_best_ask: downBook.bestAsk ?? null,
-        result_code: effectiveDecision.result,
-        chosen_side: effectiveDecision.side,
+        result_code: paperResultCode,
+        chosen_side: paperChosenSide,
         notional_usd: variant.notionalUsd,
-        entry_price: entryPrice,
-        simulated_shares: simulatedShares,
+        entry_price: paperEntryPrice,
+        simulated_shares: paperSimulatedShares,
         dry_run: s.dryRun
       });
 
-      if (insertResult.inserted && (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN")) {
+      if (insertResult.inserted && anchoredSniper && (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN")) {
         const tokenId = effectiveDecision.side === "UP" ? poly.tokens?.upTokenId : poly.tokens?.downTokenId;
         if (tokenId) {
           sniperState.active = true;
@@ -315,7 +357,9 @@ export async function runPaperStrategyTick({
       }
 
       const tag = s.dryRun ? "DRY" : "LIVE";
-      if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
+      if (anchoredSniper && (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN")) {
+        localPaperLine = `${ANSI_YELLOW}${tag} ARMED ${effectiveDecision.side} <= ${entryPrice?.toFixed(3) ?? "?"} ($${variant.notionalUsd})${ANSI_RESET}`;
+      } else if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
         localPaperLine = `${ANSI_GREEN}${tag} ${effectiveDecision.side} @${entryPrice?.toFixed(3) ?? "?"} ($${variant.notionalUsd})${ANSI_RESET}`;
       } else {
         localPaperLine = `${ANSI_GRAY}${tag} ${effectiveDecision.result} (UP ${upMid?.toFixed?.(3) ?? "-"} vs DOWN ${downMid?.toFixed?.(3) ?? "-"})${ANSI_RESET}`;
