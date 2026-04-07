@@ -1,4 +1,5 @@
 import { CONFIG } from "../config.js";
+import { normalizeBinarySide } from "../strategy/outcomeInfer.js";
 
 function toNumber(x) {
   const n = Number(x);
@@ -102,7 +103,7 @@ export function extractResolvedOutcomeFromMarket(market, { minWinnerPrice = 0.99
   const status = String(market?.umaResolutionStatus ?? "").toLowerCase();
   const closed = Boolean(market?.closed);
 
-  let winner = null;
+  let winnerLabel = null;
   if (outcomes.length && outcomePrices.length === outcomes.length) {
     let bestIdx = -1;
     let bestPrice = -Infinity;
@@ -115,10 +116,11 @@ export function extractResolvedOutcomeFromMarket(market, { minWinnerPrice = 0.99
       }
     }
     if (bestIdx >= 0 && bestPrice >= minWinnerPrice) {
-      winner = outcomes[bestIdx] ?? null;
+      winnerLabel = outcomes[bestIdx] ?? null;
     }
   }
 
+  const winner = normalizeBinarySide(winnerLabel);
   const resolved = status === "resolved" || (closed && winner !== null);
   const resolvedAt = market?.closedTime ?? market?.umaEndDate ?? market?.endDate ?? null;
   const resolutionSource = market?.resolutionSource ?? null;
@@ -127,6 +129,7 @@ export function extractResolvedOutcomeFromMarket(market, { minWinnerPrice = 0.99
   return {
     resolved,
     winner,
+    winnerLabel,
     resolutionStatus: status || null,
     resolvedAt,
     resolutionSource,

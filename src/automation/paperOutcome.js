@@ -79,7 +79,7 @@ export async function runPaperOutcomeTick() {
         down_best_bid: null,
         down_best_ask: null,
         inferred_winner: resolved.winner,
-        official_winner: resolved.winner,
+        official_winner: resolved.winnerLabel ?? resolved.winner,
         outcome_code: "OUTCOME_OFFICIAL",
         official_resolution_status: resolved.resolutionStatus,
         official_resolution_source: resolved.resolutionSource,
@@ -99,7 +99,7 @@ export async function runPaperOutcomeTick() {
       if (!inserted) continue;
 
       insertedCount += 1;
-      const winLabel = resolved.winner ?? "?";
+      const winLabel = resolved.winnerLabel ?? resolved.winner ?? "?";
       const extraPrice =
         resolved.priceToBeat != null && resolved.priceAtClose != null
           ? ` | beat ${Number(resolved.priceToBeat).toFixed(2)} vs close ${Number(resolved.priceAtClose).toFixed(2)}`

@@ -18,11 +18,22 @@ export function inferMarketWinnerFromMids(upMid, downMid, epsilon) {
   return { winner: "DOWN", outcomeCode: "WINNER_DOWN" };
 }
 
+export function normalizeBinarySide(value) {
+  const raw = String(value ?? "").trim().toUpperCase();
+  if (!raw) return null;
+  if (raw === "UP" || raw === "YES") return "UP";
+  if (raw === "DOWN" || raw === "NO") return "DOWN";
+  return null;
+}
+
 /**
  * PnL simulado: compra a entryPrice com notional US$; se vence, shares * 1 - custo; se perde, -notional.
  */
 export function computeSimulatedPnl({ chosenSide, winnerSide, entryPrice, notionalUsd }) {
-  if (!chosenSide || !winnerSide || (chosenSide !== "UP" && chosenSide !== "DOWN")) {
+  const normalizedChosenSide = normalizeBinarySide(chosenSide);
+  const normalizedWinnerSide = normalizeBinarySide(winnerSide);
+
+  if (!normalizedChosenSide || !normalizedWinnerSide) {
     return { pnl: null, entryCorrect: null };
   }
   if (!entryPrice || !Number.isFinite(Number(entryPrice)) || Number(entryPrice) <= 0) {
@@ -31,7 +42,7 @@ export function computeSimulatedPnl({ chosenSide, winnerSide, entryPrice, notion
   const notional = Number(notionalUsd) || 0;
   const p = Number(entryPrice);
   const shares = notional / p;
-  const win = chosenSide === winnerSide;
+  const win = normalizedChosenSide === normalizedWinnerSide;
   if (win) {
     const payout = shares * 1;
     return { pnl: payout - notional, entryCorrect: true };
