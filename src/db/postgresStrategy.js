@@ -339,6 +339,7 @@ export async function getStrategyPerformanceReport(client) {
     FROM strategy_paper_outcomes
     WHERE entry_correct IS NOT NULL
       AND evaluation_method = 'gamma_resolved'
+      AND strategy_key != 'default'
     GROUP BY strategy_key
     ORDER BY total_pnl DESC
   `);
