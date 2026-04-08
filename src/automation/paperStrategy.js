@@ -58,6 +58,14 @@ function isAnchoredSniperVariant(variant) {
   return !variant?.contrarian && mode === "sniper_v2";
 }
 
+function hasEnoughBookLiquidity({ side, poly, requiredShares }) {
+  const needed = Number(requiredShares);
+  if (!Number.isFinite(needed) || needed <= 0) return false;
+  const book = side === "UP" ? poly?.orderbook?.up : poly?.orderbook?.down;
+  const askLiquidity = Number(book?.askLiquidity);
+  return Number.isFinite(askLiquidity) && askLiquidity >= needed;
+}
+
 function shouldFireStrategySnapshot(trailMap, marketSlug, settlementLeftMin, entryMinutesLeft) {
   if (!marketSlug || settlementLeftMin == null || !Number.isFinite(Number(settlementLeftMin))) return false;
   const t = Number(settlementLeftMin);
@@ -147,11 +155,16 @@ export async function runPaperStrategyTick({
 
       if (sniperState.active && sniperState.marketSlug === marketSlug) {
         const askPrice = sniperState.side === "UP" ? poly.prices?.up : poly.prices?.down;
+        const touchedShares = sniperState.notionalUsd / sniperState.limitPrice;
+        const hasLiquidity = hasEnoughBookLiquidity({
+          side: sniperState.side,
+          poly,
+          requiredShares: touchedShares
+        });
         localLiveLine = `${ANSI_YELLOW}SNIPER: wait ${sniperState.side} @ <= ${sniperState.limitPrice.toFixed(2)} (ask ${askPrice != null ? askPrice.toFixed(3) : "-"})${ANSI_RESET}`;
 
-        if (askPrice != null && Number.isFinite(Number(askPrice)) && Number(askPrice) <= sniperState.limitPrice) {
+        if (askPrice != null && Number.isFinite(Number(askPrice)) && Number(askPrice) <= sniperState.limitPrice && hasLiquidity) {
           const touchedEntryPrice = sniperState.limitPrice;
-          const touchedShares = sniperState.notionalUsd / touchedEntryPrice;
           if (sniperState.entryId != null) {
             await updatePaperSignalExecution(client, {
               id: sniperState.entryId,
@@ -191,6 +204,8 @@ export async function runPaperStrategyTick({
           }
           localPaperLine = `${ANSI_GREEN}${s.dryRun ? "DRY" : "LIVE"} ${sniperState.side} @${touchedEntryPrice.toFixed(3)} ($${sniperState.notionalUsd})${ANSI_RESET}`;
           sniperState.active = false;
+        } else if (askPrice != null && Number.isFinite(Number(askPrice)) && Number(askPrice) <= sniperState.limitPrice && !hasLiquidity) {
+          localLiveLine = `${ANSI_GRAY}SNIPER tocou preco, mas sem liquidez suficiente no book${ANSI_RESET}`;
         }
       } else if (sniperState.active && sniperState.marketSlug !== marketSlug) {
         if (sniperState.entryId != null) {
@@ -304,6 +319,11 @@ export async function runPaperStrategyTick({
 
       if ((effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") && !anchoredSniper) {
         simulatedShares = variant.notionalUsd / entryPrice;
+        if (!hasEnoughBookLiquidity({ side: effectiveDecision.side, poly, requiredShares: simulatedShares })) {
+          effectiveDecision = { ...effectiveDecision, side: null, result: "SKIP_NO_LIQUIDITY" };
+          simulatedShares = null;
+          entryPrice = null;
+        }
       }
 
       const endDate = poly.market.endDate ? new Date(poly.market.endDate) : null;
