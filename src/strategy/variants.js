@@ -49,7 +49,9 @@ export const STRATEGY_VARIANTS = [
     rollingLossHours: 24,
     maxRollingLossUsd: 9999,
     minPayoutMultiple: 2.5,
-    maxEntryPrice: 0.28
+    maxEntryPrice: 0.28,
+    takeProfitEnabled: true,
+    takeProfitPrice: 0.80
   },
   {
     key: "main_2m",

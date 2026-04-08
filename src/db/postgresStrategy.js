@@ -107,6 +107,28 @@ export async function ensureStrategySchema(client) {
     CREATE INDEX IF NOT EXISTS idx_strategy_live_orders_created
       ON strategy_live_orders (created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS strategy_live_exits (
+      id BIGSERIAL PRIMARY KEY,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      entry_id BIGINT NOT NULL REFERENCES strategy_paper_signals(id) ON DELETE CASCADE,
+      strategy_key TEXT NOT NULL DEFAULT 'default',
+      market_slug TEXT NOT NULL,
+      token_id TEXT NOT NULL,
+      side TEXT NOT NULL,
+      trigger_price NUMERIC,
+      exit_price NUMERIC,
+      size_shares NUMERIC,
+      notional_usd NUMERIC,
+      clob_order_id TEXT,
+      status TEXT NOT NULL,
+      error_message TEXT,
+      raw_response JSONB
+    );
+    CREATE INDEX IF NOT EXISTS idx_strategy_live_exits_created
+      ON strategy_live_exits (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_strategy_live_exits_entry
+      ON strategy_live_exits (entry_id, created_at DESC);
+
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_winner TEXT;
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_resolution_status TEXT;
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_resolution_source TEXT;
@@ -117,6 +139,10 @@ export async function ensureStrategySchema(client) {
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
     ALTER TABLE strategy_live_orders ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
+    ALTER TABLE strategy_live_exits ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS exit_price NUMERIC;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS exit_reason TEXT;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS exited_early BOOLEAN NOT NULL DEFAULT false;
     ALTER TABLE strategy_paper_signals DROP CONSTRAINT IF EXISTS strategy_paper_signals_market_slug_key;
     CREATE UNIQUE INDEX IF NOT EXISTS uq_strategy_paper_signals_strategy_slug
       ON strategy_paper_signals(strategy_key, market_slug);
@@ -288,6 +314,30 @@ export async function insertLiveOrder(client, row) {
   );
 }
 
+export async function insertLiveExit(client, row) {
+  await client.query(
+    `INSERT INTO strategy_live_exits (
+      entry_id, strategy_key, market_slug, token_id, side, trigger_price, exit_price,
+      size_shares, notional_usd, clob_order_id, status, error_message, raw_response
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)`,
+    [
+      row.entry_id,
+      row.strategy_key ?? "default",
+      row.market_slug,
+      row.token_id,
+      row.side,
+      row.trigger_price ?? null,
+      row.exit_price ?? null,
+      row.size_shares ?? null,
+      row.notional_usd ?? null,
+      row.clob_order_id ?? null,
+      row.status,
+      row.error_message ?? null,
+      row.raw_response != null ? JSON.stringify(row.raw_response) : null
+    ]
+  );
+}
+
 export async function findPaperEntryBySlug(client, marketSlug) {
   const res = await client.query(
     `SELECT id, strategy_key, market_slug, chosen_side, entry_price, notional_usd, result_code, dry_run
@@ -321,6 +371,61 @@ export async function findPendingPaperEntries(client, limit = 20) {
   return res.rows ?? [];
 }
 
+export async function findRecoverablePaperTakeProfitEntry(client, { strategyKey = "default", marketSlug }) {
+  const res = await client.query(
+    `SELECT
+       s.id,
+       s.strategy_key,
+       s.market_slug,
+       s.chosen_side,
+       s.entry_price,
+       s.simulated_shares,
+       s.notional_usd
+     FROM strategy_paper_signals s
+     LEFT JOIN strategy_paper_outcomes o ON o.entry_id = s.id
+     WHERE o.entry_id IS NULL
+       AND s.strategy_key = $1
+       AND s.market_slug = $2
+       AND s.chosen_side IN ('UP', 'DOWN')
+       AND s.entry_price IS NOT NULL
+       AND s.simulated_shares IS NOT NULL
+     ORDER BY s.created_at DESC
+     LIMIT 1`,
+    [String(strategyKey || "default"), String(marketSlug || "")]
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function findRecoverableLiveTakeProfitEntry(client, { strategyKey = "default", marketSlug }) {
+  const res = await client.query(
+    `SELECT
+       s.id AS entry_id,
+       s.strategy_key,
+       s.market_slug,
+       s.chosen_side,
+       s.entry_price,
+       s.notional_usd,
+       l.token_id,
+       l.size_shares
+     FROM strategy_live_orders l
+     JOIN strategy_paper_signals s ON s.id = l.entry_id
+     WHERE s.strategy_key = $1
+       AND s.market_slug = $2
+       AND l.side = 'BUY'
+       AND l.status = 'SUBMITTED'
+       AND NOT EXISTS (
+         SELECT 1
+         FROM strategy_live_exits e
+         WHERE e.entry_id = s.id
+           AND e.status = 'EXECUTED'
+       )
+     ORDER BY l.created_at DESC
+     LIMIT 1`,
+    [String(strategyKey || "default"), String(marketSlug || "")]
+  );
+  return res.rows[0] ?? null;
+}
+
 export async function insertPaperOutcome(client, row) {
   const res = await client.query(
     `INSERT INTO strategy_paper_outcomes (
@@ -328,8 +433,8 @@ export async function insertPaperOutcome(client, row) {
       up_mid, down_mid, up_best_bid, up_best_ask, down_best_bid, down_best_ask,
       inferred_winner, official_winner, outcome_code, official_resolution_status, official_resolution_source,
       official_resolved_at, official_outcome_prices_json, official_price_to_beat, official_price_at_close,
-      entry_chosen_side, entry_correct, pnl_simulated_usd, dry_run
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23,$24)
+      entry_chosen_side, entry_correct, pnl_simulated_usd, dry_run, exit_price, exit_reason, exited_early
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23,$24,$25,$26,$27)
     ON CONFLICT (entry_id) DO NOTHING
     RETURNING id`,
     [
@@ -356,7 +461,10 @@ export async function insertPaperOutcome(client, row) {
       row.entry_chosen_side ?? null,
       row.entry_correct ?? null,
       row.pnl_simulated_usd ?? null,
-      row.dry_run
+      row.dry_run,
+      row.exit_price ?? null,
+      row.exit_reason ?? null,
+      row.exited_early ?? false
     ]
   );
   if (res.rowCount > 0 && res.rows[0]?.id != null) {
@@ -375,7 +483,7 @@ export async function getStrategyPerformanceReport(client) {
       SUM(COALESCE(pnl_simulated_usd, 0)) as total_pnl
     FROM strategy_paper_outcomes
     WHERE entry_correct IS NOT NULL
-      AND evaluation_method = 'gamma_resolved'
+      AND evaluation_method IN ('gamma_resolved', 'take_profit_hit')
       AND strategy_key != 'default'
     GROUP BY strategy_key
     ORDER BY total_pnl DESC

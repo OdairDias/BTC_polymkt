@@ -49,3 +49,24 @@ export function computeSimulatedPnl({ chosenSide, winnerSide, entryPrice, notion
   }
   return { pnl: -notional, entryCorrect: false };
 }
+
+/**
+ * PnL realizado em saída antecipada:
+ * compra shares = notional / entryPrice e vende shares * exitPrice.
+ */
+export function computeRealizedExitPnl({ entryPrice, exitPrice, notionalUsd }) {
+  const entry = Number(entryPrice);
+  const exit = Number(exitPrice);
+  const notional = Number(notionalUsd) || 0;
+
+  if (!Number.isFinite(entry) || entry <= 0 || !Number.isFinite(exit) || exit <= 0) {
+    return { pnl: null, shares: null };
+  }
+
+  const shares = notional / entry;
+  const proceeds = shares * exit;
+  return {
+    pnl: proceeds - notional,
+    shares
+  };
+}

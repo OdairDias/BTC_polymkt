@@ -43,7 +43,9 @@ const DEFAULTS = {
     rollingLossHours: 24,
     maxRollingLossUsd: 12,
     minPayoutMultiple: 2.5,
-    maxEntryPrice: 0.30
+    maxEntryPrice: 0.30,
+    takeProfitEnabled: false,
+    takeProfitPrice: 0.80
   },
 
   /** Execução CLOB (conta real). Chaves só via env — nunca no código. */
@@ -100,6 +102,7 @@ function sanitizeStrategyVariantKey(value, fallback = "default") {
 
 function mergeStrategyVariant(base, candidate) {
   const c = candidate && typeof candidate === "object" ? candidate : {};
+  const takeProfitPrice = Number(c.takeProfitPrice ?? base.takeProfitPrice);
   return {
     key: sanitizeStrategyVariantKey(c.key, "default"),
     label: String(c.label ?? c.key ?? "default"),
@@ -115,7 +118,9 @@ function mergeStrategyVariant(base, candidate) {
     rollingLossHours: Math.max(1, Math.floor(Number(c.rollingLossHours ?? base.rollingLossHours))),
     maxRollingLossUsd: Math.max(0.01, Number(c.maxRollingLossUsd ?? base.maxRollingLossUsd)),
     minPayoutMultiple: Math.max(1, Number(c.minPayoutMultiple ?? base.minPayoutMultiple)),
-    maxEntryPrice: Math.max(0.01, Number(c.maxEntryPrice ?? base.maxEntryPrice))
+    maxEntryPrice: Math.max(0.01, Number(c.maxEntryPrice ?? base.maxEntryPrice)),
+    takeProfitEnabled: c.takeProfitEnabled === undefined ? Boolean(base.takeProfitEnabled) : Boolean(c.takeProfitEnabled),
+    takeProfitPrice: Number.isFinite(takeProfitPrice) ? Math.max(0.01, Math.min(0.99, takeProfitPrice)) : base.takeProfitPrice
   };
 }
 
@@ -239,7 +244,9 @@ const baseVariant = {
   rollingLossHours: CONFIG.strategy.rollingLossHours,
   maxRollingLossUsd: CONFIG.strategy.maxRollingLossUsd,
   minPayoutMultiple: CONFIG.strategy.minPayoutMultiple,
-  maxEntryPrice: CONFIG.strategy.maxEntryPrice
+  maxEntryPrice: CONFIG.strategy.maxEntryPrice,
+  takeProfitEnabled: CONFIG.strategy.takeProfitEnabled,
+  takeProfitPrice: CONFIG.strategy.takeProfitPrice
 };
 
 // Usa as variantes hardcoded em variants.js como fonte primária.

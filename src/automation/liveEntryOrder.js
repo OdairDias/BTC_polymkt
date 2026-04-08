@@ -1,12 +1,11 @@
 import { AssetType, OrderType, Side } from "@polymarket/clob-client";
 import { CONFIG } from "../config.js";
+import { insertLiveExit, insertLiveOrder } from "../db/postgresStrategy.js";
 import { getOrCreateClobClient, isRelayerBuilderConfigured } from "./liveClob.js";
-import { insertLiveOrder } from "../db/postgresStrategy.js";
 
 const LIVE_DEBUG = process.env.STRATEGY_LIVE_DEBUG === "true";
 const ERR_MSG_MAX = 8000;
 
-/** O @polymarket/clob-client usa ApiError { status, data }, não axios.response. */
 function explainClobFailure(err) {
   const name = err?.name;
   const hasApiShape =
@@ -14,10 +13,10 @@ function explainClobFailure(err) {
   if (hasApiShape) {
     const dataStr =
       typeof err.data === "string" ? err.data : JSON.stringify(err.data ?? null, null, 0);
-    const clip = dataStr.length > 2000 ? `${dataStr.slice(0, 2000)}…` : dataStr;
+    const clip = dataStr.length > 2000 ? `${dataStr.slice(0, 2000)}...` : dataStr;
     const msg = String(err.message || "ApiError").trim();
     return {
-      line: `${msg} · HTTP ${err.status ?? "?"} · ${clip}`,
+      line: `${msg} | HTTP ${err.status ?? "?"} | ${clip}`,
       raw: { kind: "ApiError", message: msg, status: err.status ?? null, data: err.data ?? null }
     };
   }
@@ -26,7 +25,7 @@ function explainClobFailure(err) {
     const body = ax.data;
     const bodyStr = typeof body === "string" ? body : JSON.stringify(body ?? {});
     return {
-      line: `${err.message} · HTTP ${ax.status} · ${bodyStr.slice(0, 2000)}`,
+      line: `${err.message} | HTTP ${ax.status} | ${bodyStr.slice(0, 2000)}`,
       raw: { kind: "axiosLike", message: err.message, status: ax.status, data: ax.data }
     };
   }
@@ -41,7 +40,6 @@ function explainClobFailure(err) {
   };
 }
 
-/** Casas decimais da parte fracionária do tick (ex.: "0.01" → 2). */
 function decimalsFromTickString(tickSize) {
   const s = String(tickSize).trim();
   const i = s.indexOf(".");
@@ -57,21 +55,15 @@ function roundDownDecimals(n, places) {
   return Math.floor((n + 1e-12) * f) / f;
 }
 
-/**
- * Preço máximo (tick) + USDC a gastar (2 dec), para `createAndPostMarketOrder`.
- * A API trata FOK como "market buy" e valida maker/taker com a rota de mercado —
- * ordem **limite** + FOK gerava "invalid amounts" mesmo com arredondamento.
- */
 function capPriceAndAmountUsd(limitPrice, notionalUsd, tickSizeStr) {
   const tickDec = decimalsFromTickString(tickSizeStr);
   const capPrice = Number(roundDownDecimals(Number(limitPrice), tickDec).toFixed(tickDec));
   if (!Number.isFinite(capPrice) || capPrice <= 0) {
-    throw new Error(`preço limite inválido após tick (${tickSizeStr})`);
+    throw new Error(`preco limite invalido apos tick (${tickSizeStr})`);
   }
-  // Notional Usd to Shares
   const amountUsd = Number(roundDownDecimals(Number(notionalUsd), 2).toFixed(2));
   if (amountUsd < 0.01) {
-    throw new Error("STRATEGY_NOTIONAL_USD < 0.01 após arredondar");
+    throw new Error("STRATEGY_NOTIONAL_USD < 0.01 apos arredondar");
   }
   const sizeShares = Number(roundDownDecimals(amountUsd / capPrice, 2).toFixed(2));
   return { capPrice, amountUsd, sizeShares };
@@ -104,11 +96,6 @@ function extractOrderMeta(result) {
   return { orderId, status: result.status ?? null, errorMsg: null };
 }
 
-/**
- * Envia BUY **mercado** FOK no CLOB (~`notionalUsd` USDC, teto = preço do paper),
- * via `createAndPostMarketOrder` (montantes alinhados à validação "market buy").
- * Grava linha em strategy_live_orders (sucesso ou erro).
- */
 export async function tryPlaceLiveEntryOrder({
   pgClient,
   entryId,
@@ -134,12 +121,10 @@ export async function tryPlaceLiveEntryOrder({
     const tickSize = await clob.getTickSize(String(tokenId));
     const negRisk = await clob.getNegRisk(String(tokenId));
 
-    // Para estratégia MAKER (entrar barato), não usamos slippage de Taker.
-    // Usamos o preço alvo exato ou o preço sugerido pelo modelo.
     const price0 = Number(limitPrice);
     const notional = Number(notionalUsd);
     if (!Number.isFinite(price0) || price0 <= 0 || !Number.isFinite(notional) || notional <= 0) {
-      throw new Error("limitPrice ou notionalUsd inválidos para CLOB");
+      throw new Error("limitPrice ou notionalUsd invalidos para CLOB");
     }
 
     const { capPrice, amountUsd, sizeShares: finalSize } = capPriceAndAmountUsd(price0, notional, tickSize);
@@ -150,21 +135,19 @@ export async function tryPlaceLiveEntryOrder({
     const ctxLog = {
       market_slug: marketSlug,
       token_id_len: String(tokenId).length,
-      token_id_prefix: `${String(tokenId).slice(0, 20)}…`,
+      token_id_prefix: `${String(tokenId).slice(0, 20)}...`,
       capPrice,
       amountUsd,
       tickSize,
       negRisk,
       signatureType: CONFIG.live.signatureType,
-      funder: funderRaw ? `${funderRaw.slice(0, 6)}…${funderRaw.slice(-4)}` : null,
+      funder: funderRaw ? `${funderRaw.slice(0, 6)}...${funderRaw.slice(-4)}` : null,
       relayerBuilderHeaders: isRelayerBuilderConfigured()
     };
     if (LIVE_DEBUG) {
-      console.error("[STRATEGY_LIVE_DEBUG] createAndPostMarketOrder context:", JSON.stringify(ctxLog));
+      console.error("[STRATEGY_LIVE_DEBUG] createAndPostOrder context:", JSON.stringify(ctxLog));
     }
 
-    // Ordem LIMIT (GTD) para ficar no book esperando o "pavio" (desconto)
-    // expiration em Unix seconds é obrigatório para GTD, caso contrário usa GTC sem expiração
     const expirationSec = expiration ? Math.floor(new Date(expiration).getTime() / 1000) : 0;
     const orderType = expirationSec > 0 ? OrderType.GTD : OrderType.GTC;
     const result = await clob.createAndPostOrder(
@@ -180,12 +163,10 @@ export async function tryPlaceLiveEntryOrder({
     );
 
     const meta = extractOrderMeta(result);
-    if (meta.errorMsg) {
-      throw new Error(meta.errorMsg);
-    }
+    if (meta.errorMsg) throw new Error(meta.errorMsg);
 
     const orderId = meta.orderId;
-    const statusHint = meta.status ? ` · status ${meta.status}` : "";
+    const statusHint = meta.status ? ` | status ${meta.status}` : "";
 
     await insertLiveOrder(pgClient, {
       ...rowBase,
@@ -197,7 +178,7 @@ export async function tryPlaceLiveEntryOrder({
 
     return {
       ok: true,
-      line: `CLOB Limit Maker ok · price ${capPrice} · order ${orderId ?? "(sem id na resposta)"}${statusHint}`
+      line: `CLOB Limit Maker ok | price ${capPrice} | order ${orderId ?? "(sem id na resposta)"}${statusHint}`
     };
   } catch (err) {
     const explained = explainClobFailure(err);
@@ -206,19 +187,19 @@ export async function tryPlaceLiveEntryOrder({
       try {
         const c = await getOrCreateClobClient();
         const ba = await c.getBalanceAllowance({ asset_type: AssetType.COLLATERAL });
-        msg = `${msg} · collateral balance=${ba.balance} allowance=${ba.allowance ?? JSON.stringify(ba.allowances ?? "—")}`;
+        msg = `${msg} | collateral balance=${ba.balance} allowance=${ba.allowance ?? JSON.stringify(ba.allowances ?? "-")}`;
       } catch {
-        // ignora falha do diagnóstico
+        // ignore diagnostic failure
       }
     }
     const rawOut = {
       ...explained.raw,
       requestContext: {
         market_slug: marketSlug,
-        token_id_prefix: `${String(tokenId).slice(0, 24)}…`,
+        token_id_prefix: `${String(tokenId).slice(0, 24)}...`,
         signatureType: CONFIG.live.signatureType,
         funder_masked: (CONFIG.live.funderAddress || "").trim()
-          ? `${String(CONFIG.live.funderAddress).trim().slice(0, 6)}…${String(CONFIG.live.funderAddress).trim().slice(-4)}`
+          ? `${String(CONFIG.live.funderAddress).trim().slice(0, 6)}...${String(CONFIG.live.funderAddress).trim().slice(-4)}`
           : null,
         relayer_builder_headers: isRelayerBuilderConfigured()
       }
@@ -241,19 +222,12 @@ export async function tryPlaceLiveEntryOrder({
   }
 }
 
-/**
- * Deve enviar ordem real? Dry-run desligado + armação explícita + chave presente.
- */
 export function shouldAttemptLiveOrder() {
   const s = CONFIG.strategy;
   const pk = (CONFIG.live.privateKey || "").trim();
   return !s.dryRun && s.liveArmed && Boolean(pk);
 }
 
-/**
- * Tenta executar FOK imediato na estratégia Sniper / Tape Reading.
- * Usa amount = notionalUsd para apostas de valor exato (ex: $1).
- */
 export async function tryPlaceSniperFokOrder({
   pgClient,
   entryId,
@@ -268,7 +242,7 @@ export async function tryPlaceSniperFokOrder({
     token_id: String(tokenId),
     side: "BUY",
     limit_price: limitPrice,
-    size_shares: null, // será calculado internamente e logado no banco, FOK do clob só precisa de amount
+    size_shares: null,
     notional_usd: notionalUsd
   };
 
@@ -280,7 +254,7 @@ export async function tryPlaceSniperFokOrder({
     const price0 = Number(limitPrice);
     const notional = Number(notionalUsd);
     if (!Number.isFinite(price0) || price0 <= 0 || !Number.isFinite(notional) || notional <= 0) {
-      throw new Error("limitPrice ou notionalUsd inválidos para CLOB");
+      throw new Error("limitPrice ou notionalUsd invalidos para CLOB");
     }
 
     const { capPrice, amountUsd, sizeShares: finalSize } = capPriceAndAmountUsd(price0, notional, tickSize);
@@ -288,7 +262,13 @@ export async function tryPlaceSniperFokOrder({
     rowBase.size_shares = finalSize;
 
     const funderRaw = (CONFIG.live.funderAddress || "").trim();
-    const ctxLog = { market_slug: marketSlug, amountUsd, capPrice, f: "SNIPER_FOK", funder: funderRaw ? `${funderRaw.slice(0,6)}…` : null };
+    const ctxLog = {
+      market_slug: marketSlug,
+      amountUsd,
+      capPrice,
+      f: "SNIPER_FOK",
+      funder: funderRaw ? `${funderRaw.slice(0, 6)}...` : null
+    };
     if (LIVE_DEBUG) console.error("[STRATEGY_LIVE_DEBUG] FOK:", JSON.stringify(ctxLog));
 
     const result = await clob.createAndPostMarketOrder(
@@ -307,7 +287,7 @@ export async function tryPlaceSniperFokOrder({
     if (meta.errorMsg) throw new Error(meta.errorMsg);
 
     const orderId = meta.orderId;
-    const statusHint = meta.status ? ` · status ${meta.status}` : "";
+    const statusHint = meta.status ? ` | status ${meta.status}` : "";
 
     await insertLiveOrder(pgClient, {
       ...rowBase,
@@ -319,7 +299,9 @@ export async function tryPlaceSniperFokOrder({
 
     return {
       ok: true,
-      line: `CLOB SNIPER FOK ok · price ${capPrice} · amt $${amountUsd} · order ${orderId ?? "(sem id)"}${statusHint}`
+      line: `CLOB SNIPER FOK ok | price ${capPrice} | amt $${amountUsd} | order ${orderId ?? "(sem id)"}${statusHint}`,
+      sizeShares: finalSize,
+      filledPrice: capPrice
     };
   } catch (err) {
     const explained = explainClobFailure(err);
@@ -332,7 +314,119 @@ export async function tryPlaceSniperFokOrder({
         error_message: msg.slice(0, ERR_MSG_MAX),
         raw_response: explained.raw
       });
-    } catch {}
+    } catch {
+      // ignore duplicate insert etc.
+    }
     return { ok: false, line: `CLOB Sniper erro: ${msg}` };
+  }
+}
+
+export async function tryPlaceTakeProfitExitOrder({
+  pgClient,
+  entryId,
+  strategyKey,
+  marketSlug,
+  tokenId,
+  targetPrice,
+  sizeShares,
+  notionalUsd
+}) {
+  const rowBase = {
+    entry_id: entryId,
+    strategy_key: strategyKey ?? "default",
+    market_slug: marketSlug,
+    token_id: String(tokenId),
+    side: "SELL",
+    trigger_price: targetPrice,
+    exit_price: targetPrice,
+    size_shares: sizeShares,
+    notional_usd: notionalUsd
+  };
+
+  try {
+    const clob = await getOrCreateClobClient();
+    const tickSize = await clob.getTickSize(String(tokenId));
+    const negRisk = await clob.getNegRisk(String(tokenId));
+
+    const target = Number(targetPrice);
+    const wantedShares = Number(sizeShares);
+    if (!Number.isFinite(target) || target <= 0 || target >= 1) {
+      throw new Error("takeProfitPrice invalido para saida live");
+    }
+    if (!Number.isFinite(wantedShares) || wantedShares <= 0) {
+      throw new Error("sizeShares invalido para saida live");
+    }
+
+    const tickDec = decimalsFromTickString(tickSize);
+    const floorPrice = Number(roundDownDecimals(target, tickDec).toFixed(tickDec));
+    let finalShares = Number(roundDownDecimals(wantedShares, 2).toFixed(2));
+
+    try {
+      const conditionalBalance = await clob.getBalanceAllowance({
+        asset_type: AssetType.CONDITIONAL,
+        token_id: String(tokenId)
+      });
+      const availableShares = Number(conditionalBalance?.balance ?? NaN);
+      if (Number.isFinite(availableShares) && availableShares > 0) {
+        finalShares = Number(roundDownDecimals(Math.min(wantedShares, availableShares), 2).toFixed(2));
+      }
+    } catch {
+      // fallback to tracked shares
+    }
+
+    if (!Number.isFinite(finalShares) || finalShares < 0.01) {
+      throw new Error("saldo insuficiente para executar take profit");
+    }
+
+    rowBase.exit_price = floorPrice;
+    rowBase.size_shares = finalShares;
+
+    const result = await clob.createAndPostMarketOrder(
+      {
+        tokenID: String(tokenId),
+        side: Side.SELL,
+        amount: finalShares,
+        price: floorPrice,
+        orderType: OrderType.FOK
+      },
+      { tickSize, negRisk },
+      OrderType.FOK
+    );
+
+    const meta = extractOrderMeta(result);
+    if (meta.errorMsg) throw new Error(meta.errorMsg);
+
+    const orderId = meta.orderId;
+    const statusHint = meta.status ? ` | status ${meta.status}` : "";
+
+    await insertLiveExit(pgClient, {
+      ...rowBase,
+      clob_order_id: orderId != null ? String(orderId) : null,
+      status: "EXECUTED",
+      error_message: null,
+      raw_response: result
+    });
+
+    return {
+      ok: true,
+      line: `CLOB TAKE PROFIT ok | sell ${finalShares} @ ${floorPrice} | order ${orderId ?? "(sem id)"}${statusHint}`,
+      sizeShares: finalShares,
+      filledPrice: floorPrice
+    };
+  } catch (err) {
+    const explained = explainClobFailure(err);
+    const msg = explained.line.slice(0, 400);
+    try {
+      await insertLiveExit(pgClient, {
+        ...rowBase,
+        clob_order_id: null,
+        status: "ERROR",
+        error_message: msg.slice(0, ERR_MSG_MAX),
+        raw_response: explained.raw
+      });
+    } catch {
+      // ignore insert failure
+    }
+    return { ok: false, line: `CLOB Take Profit erro: ${msg}` };
   }
 }
