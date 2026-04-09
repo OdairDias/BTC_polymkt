@@ -2,6 +2,7 @@
  * Decide o lado na janela final.
  * - decisionMode=sniper_v2 (padrao atual): direcao por ptbDelta + filtros RSI/MACD/HA
  * - decisionMode=main_2m_mid: replica a logica da main (UP vs DOWN por mid com empate por epsilon)
+ * - decisionMode=cheap_revert: entra cedo no lado mais barato e tenta vender antes do fim
  */
 export function decideLateWindowSide({
   decisionMode = "sniper_v2",
@@ -9,6 +10,10 @@ export function decideLateWindowSide({
   entryMinutesLeft,
   upMid,
   downMid,
+  upBuy,
+  downBuy,
+  targetEntryPrice,
+  minEntryPrice,
   epsilon,
   ptbDelta,
   rsiNow,
@@ -41,6 +46,35 @@ export function decideLateWindowSide({
     }
     if (diff > 0) return { inWindow: true, result: "UP", side: "UP", upMid, downMid };
     return { inWindow: true, result: "DOWN", side: "DOWN", upMid, downMid };
+  }
+
+  if (mode === "cheap_revert") {
+    const upAsk = Number.isFinite(Number(upBuy)) ? Number(upBuy) : null;
+    const downAsk = Number.isFinite(Number(downBuy)) ? Number(downBuy) : null;
+    if (upAsk === null || downAsk === null) {
+      return { inWindow: true, result: "SKIP_NO_BUY_PRICE", side: null, upMid, downMid };
+    }
+
+    if (Math.abs(upAsk - downAsk) <= eps) {
+      return { inWindow: true, result: "SKIP_TIE", side: null, upMid, downMid };
+    }
+
+    const chosenSide = upAsk < downAsk ? "UP" : "DOWN";
+    const cheapPrice = chosenSide === "UP" ? upAsk : downAsk;
+    const maxEntry = Number(targetEntryPrice);
+    const minEntry = Number(minEntryPrice);
+
+    if (!Number.isFinite(maxEntry) || maxEntry <= 0) {
+      return { inWindow: true, result: "SKIP_BAD_TARGET_PRICE", side: null, upMid, downMid };
+    }
+    if (cheapPrice > maxEntry) {
+      return { inWindow: true, result: "SKIP_CHEAP_TOO_EXPENSIVE", side: null, upMid, downMid };
+    }
+    if (Number.isFinite(minEntry) && minEntry > 0 && cheapPrice < minEntry) {
+      return { inWindow: true, result: "SKIP_CHEAP_TOO_CHEAP", side: null, upMid, downMid };
+    }
+
+    return { inWindow: true, result: chosenSide, side: chosenSide, upMid, downMid };
   }
 
   // sniper_v2
@@ -77,4 +111,3 @@ export function decideLateWindowSide({
 
   return { inWindow: true, result: chosenSide, side: chosenSide, upMid, downMid };
 }
-

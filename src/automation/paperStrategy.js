@@ -32,7 +32,10 @@ const liveTakeProfitStateByStrategy = new Map();
 const lastPaperLineByStrategy = new Map();
 const lastLiveLineByStrategy = new Map();
 
-function getVariants() {
+function getVariants(variantSubset = null) {
+  if (Array.isArray(variantSubset) && variantSubset.length) {
+    return variantSubset.filter((v) => v && v.enabled !== false);
+  }
   const configured = Array.isArray(CONFIG.strategy.variants) ? CONFIG.strategy.variants : [];
   if (configured.length) return configured.filter((v) => v && v.enabled !== false);
   return [
@@ -49,8 +52,10 @@ function getVariants() {
       maxRollingLossUsd: CONFIG.strategy.maxRollingLossUsd,
       minPayoutMultiple: CONFIG.strategy.minPayoutMultiple,
       maxEntryPrice: CONFIG.strategy.maxEntryPrice,
+      minEntryPrice: CONFIG.strategy.minEntryPrice,
       takeProfitEnabled: CONFIG.strategy.takeProfitEnabled,
-      takeProfitPrice: CONFIG.strategy.takeProfitPrice
+      takeProfitPrice: CONFIG.strategy.takeProfitPrice,
+      forceExitMinutesLeft: CONFIG.strategy.forceExitMinutesLeft
     }
   ];
 }
@@ -77,7 +82,8 @@ function defaultTakeProfitState() {
     sizeShares: null,
     notionalUsd: null,
     entryId: null,
-    entryPrice: null
+    entryPrice: null,
+    forceExitMinutesLeft: null
   };
 }
 
@@ -99,6 +105,7 @@ function armTakeProfitState(state, payload) {
   state.notionalUsd = payload.notionalUsd;
   state.entryId = payload.entryId;
   state.entryPrice = payload.entryPrice;
+  state.forceExitMinutesLeft = payload.forceExitMinutesLeft ?? null;
 }
 
 function isAnchoredSniperVariant(variant) {
@@ -107,11 +114,17 @@ function isAnchoredSniperVariant(variant) {
 }
 
 function getTakeProfitConfig(variant) {
-  const enabled = Boolean(variant?.takeProfitEnabled);
+  const takeProfitEnabled = Boolean(variant?.takeProfitEnabled);
   const price = Number(variant?.takeProfitPrice);
+  const forceExitMinutesLeft = Number(variant?.forceExitMinutesLeft);
+  const timeStopEnabled = Number.isFinite(forceExitMinutesLeft) && forceExitMinutesLeft > 0;
+  const priceEnabled = takeProfitEnabled && Number.isFinite(price) && price > 0 && price < 1;
   return {
-    enabled: enabled && Number.isFinite(price) && price > 0 && price < 1,
-    price
+    enabled: priceEnabled || timeStopEnabled,
+    takeProfitEnabled: priceEnabled,
+    price,
+    timeStopEnabled,
+    forceExitMinutesLeft: timeStopEnabled ? forceExitMinutesLeft : null
   };
 }
 
@@ -178,7 +191,8 @@ export async function runPaperStrategyTick({
   ptbDelta,
   rsiNow,
   macd,
-  haNarrative
+  haNarrative,
+  variants: variantSubset = null
 }) {
   const s = CONFIG.strategy;
   if (!s.enabled) return { line: null };
@@ -204,7 +218,7 @@ export async function runPaperStrategyTick({
     };
   }
 
-  const variants = getVariants();
+  const variants = getVariants(variantSubset);
   if (!variants.length) return { line: null };
 
   const upBook = poly.orderbook?.up ?? {};
@@ -251,7 +265,8 @@ export async function runPaperStrategyTick({
               sizeShares: Number(recoverPaper.simulated_shares),
               notionalUsd: Number(recoverPaper.notional_usd),
               entryId: recoverPaper.id,
-              entryPrice: Number(recoverPaper.entry_price)
+              entryPrice: Number(recoverPaper.entry_price),
+              forceExitMinutesLeft: takeProfit.forceExitMinutesLeft
             });
           }
         }
@@ -270,9 +285,10 @@ export async function runPaperStrategyTick({
               sizeShares: Number(recoverLive.size_shares),
               notionalUsd: Number(recoverLive.notional_usd),
               entryId: recoverLive.entry_id,
-              entryPrice: Number(recoverLive.entry_price)
+              entryPrice: Number(recoverLive.entry_price),
+              forceExitMinutesLeft: takeProfit.forceExitMinutesLeft
             });
-            localLiveLine = `${ANSI_YELLOW}TP LIVE RECOVERED: ${recoverLive.chosen_side} @ ${takeProfit.price.toFixed(2)}${ANSI_RESET}`;
+            localLiveLine = `${ANSI_YELLOW}EXIT LIVE RECOVERED: ${recoverLive.chosen_side}${takeProfit.takeProfitEnabled ? ` @ ${takeProfit.price.toFixed(2)}` : ""}${ANSI_RESET}`;
           }
         }
 
@@ -287,10 +303,18 @@ export async function runPaperStrategyTick({
               requiredShares: paperTakeProfitState.sizeShares,
               liquiditySide: "bid"
             });
-            if (bidPrice != null && bidPrice >= paperTakeProfitState.targetPrice && hasLiquidity) {
+            const targetPrice = toFiniteNumber(paperTakeProfitState.targetPrice);
+            const forceExitMinutesLeft = toFiniteNumber(paperTakeProfitState.forceExitMinutesLeft);
+            const timeStopDue =
+              forceExitMinutesLeft != null &&
+              settlementLeftMin != null &&
+              Number.isFinite(Number(settlementLeftMin)) &&
+              Number(settlementLeftMin) <= forceExitMinutesLeft;
+
+            if (targetPrice != null && bidPrice != null && bidPrice >= targetPrice && hasLiquidity) {
               const realized = computeRealizedExitPnl({
                 entryPrice: paperTakeProfitState.entryPrice,
-                exitPrice: paperTakeProfitState.targetPrice,
+                exitPrice: targetPrice,
                 notionalUsd: paperTakeProfitState.notionalUsd
               });
               await insertPaperOutcome(client, {
@@ -318,14 +342,57 @@ export async function runPaperStrategyTick({
                 entry_correct: true,
                 pnl_simulated_usd: realized.pnl,
                 dry_run: s.dryRun,
-                exit_price: paperTakeProfitState.targetPrice,
+                exit_price: targetPrice,
                 exit_reason: "TAKE_PROFIT",
                 exited_early: true
               });
-              localPaperLine = `${ANSI_GREEN}${tag} TP ${paperTakeProfitState.side} @${paperTakeProfitState.targetPrice.toFixed(3)} (PnL ~$${(realized.pnl ?? 0).toFixed(2)})${ANSI_RESET}`;
+              localPaperLine = `${ANSI_GREEN}${tag} TP ${paperTakeProfitState.side} @${targetPrice.toFixed(3)} (PnL ~$${(realized.pnl ?? 0).toFixed(2)})${ANSI_RESET}`;
               clearTakeProfitState(paperTakeProfitState);
-            } else if (bidPrice != null && bidPrice >= paperTakeProfitState.targetPrice && !hasLiquidity) {
-              localPaperLine = `${ANSI_GRAY}${tag} TP aguardando liquidez @ ${paperTakeProfitState.targetPrice.toFixed(2)}${ANSI_RESET}`;
+            } else if (targetPrice != null && bidPrice != null && bidPrice >= targetPrice && !hasLiquidity) {
+              localPaperLine = `${ANSI_GRAY}${tag} TP aguardando liquidez @ ${targetPrice.toFixed(2)}${ANSI_RESET}`;
+            } else if (timeStopDue) {
+              if (bidPrice != null && bidPrice > 0 && hasLiquidity) {
+                const realized = computeRealizedExitPnl({
+                  entryPrice: paperTakeProfitState.entryPrice,
+                  exitPrice: bidPrice,
+                  notionalUsd: paperTakeProfitState.notionalUsd
+                });
+                const entryCorrect =
+                  realized.pnl > 0 ? true : realized.pnl < 0 ? false : null;
+                await insertPaperOutcome(client, {
+                  entry_id: paperTakeProfitState.entryId,
+                  strategy_key: key,
+                  market_slug: marketSlug,
+                  seconds_left_at_eval: Math.max(0, Number(settlementLeftMin || 0) * 60),
+                  evaluation_method: "time_stop_exit",
+                  up_mid: upMid,
+                  down_mid: downMid,
+                  up_best_bid: upBook.bestBid ?? null,
+                  up_best_ask: upBook.bestAsk ?? null,
+                  down_best_bid: downBook.bestBid ?? null,
+                  down_best_ask: downBook.bestAsk ?? null,
+                  inferred_winner: null,
+                  official_winner: null,
+                  outcome_code: "EXIT_TIME_STOP",
+                  official_resolution_status: null,
+                  official_resolution_source: null,
+                  official_resolved_at: null,
+                  official_outcome_prices_json: null,
+                  official_price_to_beat: null,
+                  official_price_at_close: null,
+                  entry_chosen_side: paperTakeProfitState.side,
+                  entry_correct: entryCorrect,
+                  pnl_simulated_usd: realized.pnl,
+                  dry_run: s.dryRun,
+                  exit_price: bidPrice,
+                  exit_reason: "TIME_STOP",
+                  exited_early: true
+                });
+                localPaperLine = `${ANSI_YELLOW}${tag} TIME STOP ${paperTakeProfitState.side} @${bidPrice.toFixed(3)} (PnL ~$${(realized.pnl ?? 0).toFixed(2)})${ANSI_RESET}`;
+                clearTakeProfitState(paperTakeProfitState);
+              } else {
+                localPaperLine = `${ANSI_GRAY}${tag} TIME STOP aguardando bid/liquidez${ANSI_RESET}`;
+              }
             }
           }
         }
@@ -341,9 +408,18 @@ export async function runPaperStrategyTick({
               requiredShares: liveTakeProfitState.sizeShares,
               liquiditySide: "bid"
             });
-            localLiveLine = `${ANSI_YELLOW}TP monitor ${liveTakeProfitState.side} @ >= ${liveTakeProfitState.targetPrice.toFixed(2)} (bid ${bidPrice != null ? bidPrice.toFixed(3) : "-"})${ANSI_RESET}`;
+            const targetPrice = toFiniteNumber(liveTakeProfitState.targetPrice);
+            const forceExitMinutesLeft = toFiniteNumber(liveTakeProfitState.forceExitMinutesLeft);
+            const timeStopDue =
+              forceExitMinutesLeft != null &&
+              settlementLeftMin != null &&
+              Number.isFinite(Number(settlementLeftMin)) &&
+              Number(settlementLeftMin) <= forceExitMinutesLeft;
+            const targetText = targetPrice != null ? `TP >= ${targetPrice.toFixed(2)}` : "sem TP";
+            const timeStopText = forceExitMinutesLeft != null ? ` | stop ${forceExitMinutesLeft.toFixed(2)}m` : "";
+            localLiveLine = `${ANSI_YELLOW}EXIT monitor ${liveTakeProfitState.side} | ${targetText}${timeStopText} (bid ${bidPrice != null ? bidPrice.toFixed(3) : "-"})${ANSI_RESET}`;
 
-            if (bidPrice != null && bidPrice >= liveTakeProfitState.targetPrice && hasLiquidity) {
+            if (targetPrice != null && bidPrice != null && bidPrice >= targetPrice && hasLiquidity) {
               try {
                 const liveExit = await tryPlaceTakeProfitExitOrder({
                   pgClient: client,
@@ -351,17 +427,44 @@ export async function runPaperStrategyTick({
                   strategyKey: key,
                   marketSlug,
                   tokenId: liveTakeProfitState.tokenId,
-                  targetPrice: liveTakeProfitState.targetPrice,
+                  targetPrice,
+                  triggerPrice: targetPrice,
                   sizeShares: liveTakeProfitState.sizeShares,
-                  notionalUsd: liveTakeProfitState.notionalUsd
+                  notionalUsd: liveTakeProfitState.notionalUsd,
+                  exitReason: "TAKE_PROFIT",
+                  label: "TAKE PROFIT"
                 });
                 localLiveLine = liveExit?.line ? `${liveExit.ok ? ANSI_GREEN : ANSI_RED}${liveExit.line}${ANSI_RESET}` : localLiveLine;
                 if (liveExit?.ok) clearTakeProfitState(liveTakeProfitState);
               } catch (err) {
                 localLiveLine = `${ANSI_RED}TP LIVE ERRO: ${err.message}${ANSI_RESET}`;
               }
-            } else if (bidPrice != null && bidPrice >= liveTakeProfitState.targetPrice && !hasLiquidity) {
+            } else if (targetPrice != null && bidPrice != null && bidPrice >= targetPrice && !hasLiquidity) {
               localLiveLine = `${ANSI_GRAY}TP tocou preco, mas sem liquidez suficiente no bid${ANSI_RESET}`;
+            } else if (timeStopDue) {
+              if (bidPrice != null && bidPrice > 0 && hasLiquidity) {
+                try {
+                  const liveExit = await tryPlaceTakeProfitExitOrder({
+                    pgClient: client,
+                    entryId: liveTakeProfitState.entryId,
+                    strategyKey: key,
+                    marketSlug,
+                    tokenId: liveTakeProfitState.tokenId,
+                    targetPrice: bidPrice,
+                    triggerPrice: bidPrice,
+                    sizeShares: liveTakeProfitState.sizeShares,
+                    notionalUsd: liveTakeProfitState.notionalUsd,
+                    exitReason: "TIME_STOP",
+                    label: "TIME STOP"
+                  });
+                  localLiveLine = liveExit?.line ? `${liveExit.ok ? ANSI_GREEN : ANSI_RED}${liveExit.line}${ANSI_RESET}` : localLiveLine;
+                  if (liveExit?.ok) clearTakeProfitState(liveTakeProfitState);
+                } catch (err) {
+                  localLiveLine = `${ANSI_RED}TIME STOP LIVE ERRO: ${err.message}${ANSI_RESET}`;
+                }
+              } else {
+                localLiveLine = `${ANSI_GRAY}TIME STOP aguardando bid/liquidez${ANSI_RESET}`;
+              }
             }
           }
         }
@@ -407,6 +510,7 @@ export async function runPaperStrategyTick({
               liveEntry = await tryPlaceSniperFokOrder({
                 pgClient: client,
                 entryId: sniperState.entryId,
+                strategyKey: key,
                 marketSlug: sniperState.marketSlug,
                 tokenId: sniperState.tokenId,
                 limitPrice: sniperState.limitPrice,
@@ -431,7 +535,8 @@ export async function runPaperStrategyTick({
               sizeShares: touchedShares,
               notionalUsd: sniperState.notionalUsd,
               entryId: sniperState.entryId,
-              entryPrice: touchedEntryPrice
+              entryPrice: touchedEntryPrice,
+              forceExitMinutesLeft: takeProfit.forceExitMinutesLeft
             });
 
             if (liveEntry?.ok && canLiveTrade) {
@@ -443,7 +548,8 @@ export async function runPaperStrategyTick({
                 sizeShares: Number(liveEntry.sizeShares ?? touchedShares),
                 notionalUsd: sniperState.notionalUsd,
                 entryId: sniperState.entryId,
-                entryPrice: Number(liveEntry.filledPrice ?? touchedEntryPrice)
+                entryPrice: Number(liveEntry.filledPrice ?? touchedEntryPrice),
+                forceExitMinutesLeft: takeProfit.forceExitMinutesLeft
               });
             }
           }
@@ -483,6 +589,10 @@ export async function runPaperStrategyTick({
         entryMinutesLeft: variant.entryMinutesLeft,
         upMid,
         downMid,
+        upBuy,
+        downBuy,
+        targetEntryPrice: variant.targetEntryPrice,
+        minEntryPrice: variant.minEntryPrice,
         epsilon: variant.priceEpsilon,
         ptbDelta,
         rsiNow,
@@ -524,7 +634,7 @@ export async function runPaperStrategyTick({
           }
         } else {
           const mode = String(variant.decisionMode || "sniper_v2").toLowerCase();
-          if (mode === "main_2m_mid") {
+          if (mode === "main_2m_mid" || mode === "cheap_revert") {
             const sideBuy = effectiveDecision.side === "UP" ? upBuy : downBuy;
             if (sideBuy != null && Number.isFinite(Number(sideBuy)) && Number(sideBuy) > 0) {
               entryPrice = Number(sideBuy);
@@ -628,19 +738,61 @@ export async function runPaperStrategyTick({
         } else {
           localLiveLine = `${ANSI_RED}CLOB: tokenId ausente${ANSI_RESET}`;
         }
-      } else if (insertResult.inserted && takeProfit.enabled && (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN")) {
+      } else if (insertResult.inserted && (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN")) {
         const tokenId = effectiveDecision.side === "UP" ? poly.tokens?.upTokenId : poly.tokens?.downTokenId;
-        armTakeProfitState(paperTakeProfitState, {
-          marketSlug,
-          side: effectiveDecision.side,
-          tokenId,
-          targetPrice: takeProfit.price,
-          sizeShares: simulatedShares,
-          notionalUsd: variant.notionalUsd,
-          entryId: insertResult.id,
-          entryPrice
-        });
-        localLiveLine = null;
+        const canLiveTrade = shouldAttemptLiveOrder() && key === CONFIG.strategy.liveStrategyKey;
+        let liveEntry = null;
+
+        if (canLiveTrade && tokenId) {
+          try {
+            liveEntry = await tryPlaceSniperFokOrder({
+              pgClient: client,
+              entryId: insertResult.id,
+              strategyKey: key,
+              marketSlug,
+              tokenId,
+              limitPrice: entryPrice,
+              notionalUsd: variant.notionalUsd
+            });
+            localLiveLine = liveEntry?.line ? `${liveEntry.ok ? ANSI_GREEN : ANSI_RED}${liveEntry.line}${ANSI_RESET}` : null;
+          } catch (err) {
+            localLiveLine = `${ANSI_RED}LIVE ENTRY ERRO: ${err.message}${ANSI_RESET}`;
+          }
+        } else if (shouldAttemptLiveOrder() && key !== CONFIG.strategy.liveStrategyKey) {
+          localLiveLine = `${ANSI_GRAY}Live bloqueado para '${key}' (primary=${CONFIG.strategy.liveStrategyKey})${ANSI_RESET}`;
+        } else if (shouldAttemptLiveOrder() && !tokenId) {
+          localLiveLine = `${ANSI_RED}CLOB: tokenId ausente${ANSI_RESET}`;
+        } else {
+          localLiveLine = null;
+        }
+
+        if (takeProfit.enabled) {
+          armTakeProfitState(paperTakeProfitState, {
+            marketSlug,
+            side: effectiveDecision.side,
+            tokenId,
+            targetPrice: takeProfit.price,
+            sizeShares: simulatedShares,
+            notionalUsd: variant.notionalUsd,
+            entryId: insertResult.id,
+            entryPrice,
+            forceExitMinutesLeft: takeProfit.forceExitMinutesLeft
+          });
+
+          if (liveEntry?.ok && canLiveTrade) {
+            armTakeProfitState(liveTakeProfitState, {
+              marketSlug,
+              side: effectiveDecision.side,
+              tokenId,
+              targetPrice: takeProfit.price,
+              sizeShares: Number(liveEntry.sizeShares ?? simulatedShares),
+              notionalUsd: variant.notionalUsd,
+              entryId: insertResult.id,
+              entryPrice: Number(liveEntry.filledPrice ?? entryPrice),
+              forceExitMinutesLeft: takeProfit.forceExitMinutesLeft
+            });
+          }
+        }
       } else if (insertResult.inserted) {
         localLiveLine = null;
       }

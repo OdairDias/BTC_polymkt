@@ -31,6 +31,7 @@ Este bot tenta combinar esses tres pontos usando dados externos (Binance/Chainli
 - `main_2m`: estrategia legado (da branch `main`) para comparacao A/B, decide por `upMid` vs `downMid` e entra pelo preco de compra.
 - `safe_90s`: variante sniper mais conservadora (preco alvo maior, notional menor e guardas possivelmente mais restritivos).
 - `aggr_35s`: variante sniper mais agressiva (janela menor e preco alvo mais baixo).
+- `cheap_15m_tp35`: estrategia de scalp em mercado `15m`, compra cedo o lado barato e tenta realizar em `0.35` antes do fim.
 
 Arquivos:
 
@@ -38,6 +39,7 @@ Arquivos:
 - [main_2m.md](/Users/Odair/Desktop/Cursor/projeto_PLMK_BTC/PolymarketBTC15mAssistant/docs/strategies/main_2m.md)
 - [safe_90s.md](/Users/Odair/Desktop/Cursor/projeto_PLMK_BTC/PolymarketBTC15mAssistant/docs/strategies/safe_90s.md)
 - [aggr_35s.md](/Users/Odair/Desktop/Cursor/projeto_PLMK_BTC/PolymarketBTC15mAssistant/docs/strategies/aggr_35s.md)
+- [cheap_15m_tp35.md](/Users/Odair/Desktop/Cursor/projeto_PLMK_BTC/PolymarketBTC15mAssistant/docs/strategies/cheap_15m_tp35.md)
 
 ## Modos de decisao (decisionMode)
 
@@ -64,6 +66,18 @@ Ideia simples:
 
 Esse modo e mais "colado" no mercado e menos dependente de sinal externo.
 
+### `cheap_revert` (lado barato + saida antecipada)
+
+Ideia simples:
+
+- olha cedo para o mercado `15m`
+- identifica qual lado esta "barato"
+- compra somente se esse lado ainda estiver dentro de uma faixa aceitavel (nem caro demais, nem morto demais)
+- tenta vender em um alvo curto (`take profit`) antes do mercado resolver
+- se o alvo nao vier, aciona uma saida por tempo antes do fim da janela
+
+Esse modo foi pensado para depender menos de acertar o vencedor final e mais de capturar uma distorcao de preco no meio do caminho.
+
 ## Parametros (o que significam)
 
 Os parametros abaixo aparecem em `STRATEGY_VARIANTS_JSON` (por estrategia) e/ou nas configs globais.
@@ -79,6 +93,11 @@ Os parametros abaixo aparecem em `STRATEGY_VARIANTS_JSON` (por estrategia) e/ou 
 | `notionalUsd` | variante | Tamanho (em USD) da posicao por trade para essa estrategia. |
 | `minPayoutMultiple` | variante/guard | Exige que o payout minimo seja bom. Ex: `2.0` implica evitar precos muito altos. |
 | `maxEntryPrice` | variante/guard | Impede pagar caro demais (preco acima disso faz SKIP). |
+| `minEntryPrice` | variante | Evita comprar um lado "barato demais", quando a distorcao ja pode estar extrema demais. |
+| `takeProfitPrice` | variante | Preco de saida antecipada para embolsar lucro sem esperar o vencimento. |
+| `forceExitMinutesLeft` | variante | Aciona saida por tempo antes do fim da janela, mesmo sem ter batido o take profit. |
+| `marketSlugPrefix` | variante | Prefixo do slug do mercado recorrente que a estrategia deve acompanhar (ex: `btc-updown-15m`). |
+| `marketWindowMinutes` | variante | Duracao da janela desse mercado recorrente (ex: `15`). |
 
 Observacao: a regra exata de "payout multiple" depende do tipo de mercado, mas para binario simples a aproximacao `payout ~ 1/price` costuma servir como intuicao.
 

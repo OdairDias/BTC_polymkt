@@ -68,5 +68,28 @@ export const STRATEGY_VARIANTS = [
     maxRollingLossUsd: 9999,
     minPayoutMultiple: 1.0,
     maxEntryPrice: 0.99
+  },
+  {
+    key: "cheap_15m_tp35",
+    label: "Cheap Revert 15m (TP 0.35)",
+    enabled: true,
+    decisionMode: "cheap_revert",
+    entryMinutesLeft: 13.75,
+    targetEntryPrice: 0.20,
+    minEntryPrice: 0.08,
+    priceEpsilon: 0.00,
+    notionalUsd: 1.0,
+    riskGuardsEnabled: true,
+    maxConsecutiveLosses: 999,
+    rollingLossHours: 24,
+    maxRollingLossUsd: 9999,
+    minPayoutMultiple: 2.0,
+    maxEntryPrice: 0.20,
+    takeProfitEnabled: true,
+    takeProfitPrice: 0.35,
+    forceExitMinutesLeft: 2.5,
+    marketWindowMinutes: 15,
+    marketSlugPrefix: "btc-updown-15m",
+    marketSeriesSlug: "btc-up-or-down-15m"
   }
 ];

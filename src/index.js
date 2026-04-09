@@ -282,10 +282,8 @@ function priceToBeatFromPolymarketMarket(market) {
   return parsePriceToBeat(market);
 }
 
-const marketCache = {
-  market: null,
-  fetchedAtMs: 0
-};
+const marketCacheByKey = new Map();
+const priceToBeatStateByMarket = new Map();
 
 function timeLeftColorBand(minutesLeft, windowMinutes) {
   const w = Math.max(1, Number(windowMinutes) || 1);
@@ -297,29 +295,159 @@ function timeLeftColorBand(minutesLeft, windowMinutes) {
   return ANSI.reset;
 }
 
-async function resolveCurrentBtcMarket() {
-  if (CONFIG.polymarket.marketSlug) {
-    return await fetchMarketBySlug(CONFIG.polymarket.marketSlug);
+function buildMarketConfigKey(config = {}) {
+  return JSON.stringify({
+    marketSlug: config.marketSlug ?? "",
+    marketSlugPrefix: config.marketSlugPrefix ?? "",
+    marketWindowMinutes: config.marketWindowMinutes ?? null,
+    seriesId: config.seriesId ?? "",
+    autoSelectLatest: config.autoSelectLatest !== false
+  });
+}
+
+function buildRecurringMarketSlug({ slugPrefix, windowMinutes, nowMs = Date.now() }) {
+  const prefix = String(slugPrefix ?? "").trim();
+  const window = Number(windowMinutes);
+  if (!prefix || !Number.isFinite(window) || window <= 0) return null;
+  const bucketMs = Math.floor(nowMs / (window * 60_000)) * window * 60_000;
+  return `${prefix}-${Math.floor(bucketMs / 1000)}`;
+}
+
+function getStrategyMarketGroups() {
+  const configured = Array.isArray(CONFIG.strategy.variants) ? CONFIG.strategy.variants : [];
+  const variants = configured.filter((variant) => variant && variant.enabled !== false);
+  const groups = new Map();
+
+  for (const variant of variants) {
+    const customMarketConfig = {
+      marketSlug: String(variant.marketSlug ?? "").trim(),
+      marketSlugPrefix: String(variant.marketSlugPrefix ?? "").trim(),
+      marketWindowMinutes: Number.isFinite(Number(variant.marketWindowMinutes))
+        ? Number(variant.marketWindowMinutes)
+        : null,
+      seriesId: String(variant.marketSeriesId ?? "").trim(),
+      autoSelectLatest: true
+    };
+
+    const hasCustomMarket =
+      Boolean(customMarketConfig.marketSlug) ||
+      Boolean(customMarketConfig.marketSlugPrefix) ||
+      Boolean(customMarketConfig.seriesId);
+
+    const groupKey = hasCustomMarket ? buildMarketConfigKey(customMarketConfig) : "__default__";
+    const existing = groups.get(groupKey) ?? {
+      key: groupKey,
+      marketConfig: hasCustomMarket ? customMarketConfig : {},
+      variants: []
+    };
+    existing.variants.push(variant);
+    groups.set(groupKey, existing);
   }
 
-  if (!CONFIG.polymarket.autoSelectLatest) return null;
+  if (!groups.size) {
+    groups.set("__default__", {
+      key: "__default__",
+      marketConfig: {},
+      variants: []
+    });
+  }
 
+  return Array.from(groups.values());
+}
+
+function updatePriceToBeatState({ marketSlug, marketStartMs, currentPrice }) {
+  const slug = String(marketSlug ?? "");
+  if (!slug) return null;
+
+  const existing = priceToBeatStateByMarket.get(slug) ?? {
+    value: null,
+    setAtMs: null,
+    marketStartMs: marketStartMs ?? null
+  };
+  if (marketStartMs != null) existing.marketStartMs = marketStartMs;
+
+  if (existing.value === null && currentPrice !== null && Number.isFinite(Number(currentPrice))) {
+    const nowMs = Date.now();
+    const okToLatch = existing.marketStartMs == null ? true : nowMs >= existing.marketStartMs;
+    if (okToLatch) {
+      existing.value = Number(currentPrice);
+      existing.setAtMs = nowMs;
+    }
+  }
+
+  priceToBeatStateByMarket.set(slug, existing);
+  if (priceToBeatStateByMarket.size > 100) {
+    const oldestKey = priceToBeatStateByMarket.keys().next().value;
+    if (oldestKey) priceToBeatStateByMarket.delete(oldestKey);
+  }
+  return existing.value;
+}
+
+async function resolveCurrentBtcMarket(marketConfig = {}) {
+  const config = {
+    marketSlug: String(marketConfig.marketSlug ?? CONFIG.polymarket.marketSlug ?? "").trim(),
+    marketSlugPrefix: String(marketConfig.marketSlugPrefix ?? "").trim(),
+    marketWindowMinutes: Number.isFinite(Number(marketConfig.marketWindowMinutes))
+      ? Number(marketConfig.marketWindowMinutes)
+      : null,
+    seriesId: String(marketConfig.seriesId ?? CONFIG.polymarket.seriesId ?? "").trim(),
+    autoSelectLatest: marketConfig.autoSelectLatest === undefined
+      ? CONFIG.polymarket.autoSelectLatest
+      : Boolean(marketConfig.autoSelectLatest)
+  };
+
+  if (config.marketSlug) {
+    return await fetchMarketBySlug(config.marketSlug);
+  }
+
+  const cacheKey = buildMarketConfigKey(config);
   const now = Date.now();
-  if (marketCache.market && now - marketCache.fetchedAtMs < CONFIG.pollIntervalMs) {
-    return marketCache.market;
+  const cached = marketCacheByKey.get(cacheKey);
+  if (cached?.market && now - cached.fetchedAtMs < CONFIG.pollIntervalMs) {
+    return cached.market;
   }
 
-  const events = await fetchLiveEventsBySeriesId({ seriesId: CONFIG.polymarket.seriesId, limit: 25 });
-  const markets = flattenEventMarkets(events);
-  const picked = pickLatestLiveMarket(markets);
+  let picked = null;
 
-  marketCache.market = picked;
-  marketCache.fetchedAtMs = now;
+  if (config.marketSlugPrefix && config.marketWindowMinutes) {
+    const bucketMs = config.marketWindowMinutes * 60_000;
+    const candidates = [
+      now,
+      now - bucketMs,
+      now + bucketMs
+    ]
+      .map((candidateNow) => buildRecurringMarketSlug({
+        slugPrefix: config.marketSlugPrefix,
+        windowMinutes: config.marketWindowMinutes,
+        nowMs: candidateNow
+      }))
+      .filter(Boolean);
+
+    for (const candidateSlug of new Set(candidates)) {
+      try {
+        const market = await fetchMarketBySlug(candidateSlug);
+        if (market) {
+          picked = market;
+          break;
+        }
+      } catch {
+        // tenta o proximo slug candidato
+      }
+    }
+  }
+
+  if (!picked && config.autoSelectLatest && config.seriesId) {
+    const events = await fetchLiveEventsBySeriesId({ seriesId: config.seriesId, limit: 25 });
+    const markets = flattenEventMarkets(events);
+    picked = pickLatestLiveMarket(markets);
+  }
+
+  marketCacheByKey.set(cacheKey, { market: picked, fetchedAtMs: now });
   return picked;
 }
 
-async function fetchPolymarketSnapshot() {
-  const market = await resolveCurrentBtcMarket();
+async function fetchPolymarketSnapshot(marketConfig = {}) {
+  const market = await resolveCurrentBtcMarket(marketConfig);
 
   if (!market) return { ok: false, reason: "market_not_found" };
 
@@ -446,7 +574,6 @@ async function main() {
 
   let prevSpotPrice = null;
   let prevCurrentPrice = null;
-  let priceToBeatState = { slug: null, value: null, setAtMs: null };
 
   const header = [
     "timestamp",
@@ -485,13 +612,28 @@ async function main() {
           ? Promise.resolve({ price: chainlinkWsPrice, updatedAt: chainlinkWsTick?.updatedAt ?? null, source: "chainlink_ws" })
           : fetchChainlinkBtcUsd();
 
-      const [klines1m, klines5m, lastPrice, chainlink, poly] = await Promise.all([
+      const strategyMarketGroups = getStrategyMarketGroups();
+      const marketSnapshotsPromise = Promise.all(
+        strategyMarketGroups.map(async (group) => ({
+          ...group,
+          poly: await fetchPolymarketSnapshot(group.marketConfig)
+        }))
+      );
+
+      const [klines1m, klines5m, lastPrice, chainlink, marketSnapshots] = await Promise.all([
         fetchKlines({ interval: "1m", limit: 240 }),
         fetchKlines({ interval: "5m", limit: 200 }),
         fetchLastPrice(),
         chainlinkPromise,
-        fetchPolymarketSnapshot()
+        marketSnapshotsPromise
       ]);
+
+      const displaySnapshot =
+        marketSnapshots.find((group) => group.key === "__default__") ??
+        marketSnapshots.find((group) => group.poly?.ok) ??
+        marketSnapshots[0] ??
+        { poly: { ok: false, reason: "market_not_found" } };
+      const poly = displaySnapshot.poly;
 
       const settlementMs = poly.ok && poly.market?.endDate ? new Date(poly.market.endDate).getTime() : null;
       const settlementLeftMin = settlementMs ? (settlementMs - Date.now()) / 60_000 : null;
@@ -628,20 +770,9 @@ async function main() {
       const currentPrice = chainlink?.price ?? null;
       const marketSlug = poly.ok ? String(poly.market?.slug ?? "") : "";
       const marketStartMs = poly.ok && poly.market?.eventStartTime ? new Date(poly.market.eventStartTime).getTime() : null;
-
-      if (marketSlug && priceToBeatState.slug !== marketSlug) {
-        priceToBeatState = { slug: marketSlug, value: null, setAtMs: null };
-      }
-
-      if (priceToBeatState.slug && priceToBeatState.value === null && currentPrice !== null) {
-        const nowMs = Date.now();
-        const okToLatch = marketStartMs === null ? true : nowMs >= marketStartMs;
-        if (okToLatch) {
-          priceToBeatState = { slug: priceToBeatState.slug, value: Number(currentPrice), setAtMs: nowMs };
-        }
-      }
-
-      const priceToBeat = priceToBeatState.slug === marketSlug ? priceToBeatState.value : null;
+      const priceToBeat = poly.ok
+        ? updatePriceToBeatState({ marketSlug, marketStartMs, currentPrice })
+        : null;
       const currentPriceBaseLine = colorPriceLine({
         label: "CURRENT PRICE",
         price: currentPrice,
@@ -666,7 +797,7 @@ async function main() {
       const currentPriceValue = currentPriceBaseLine.split(": ")[1] ?? currentPriceBaseLine;
       const currentPriceLine = kv("CURRENT PRICE:", `${currentPriceValue} (${ptbDeltaText})`);
 
-      if (poly.ok && poly.market && priceToBeatState.value === null) {
+      if (poly.ok && poly.market && priceToBeat === null) {
         const slug = safeFileSlug(poly.market.slug || poly.market.id || "market");
         if (slug && !dumpedMarkets.has(slug)) {
           dumpedMarkets.add(slug);
@@ -706,17 +837,45 @@ async function main() {
       let liveOrderStatusLine = null;
       let outcomeStatusLine = null;
       if (CONFIG.strategy.enabled) {
-        const st = await runPaperStrategyTick({ 
-          poly, 
-          settlementLeftMin,
-          ptbDelta,
-          rsiNow,
-          macd,
-          haNarrative
-        });
-        if (st?.line) strategyStatusLine = st.line;
-        if (st?.liveOrderLine) liveOrderStatusLine = st.liveOrderLine;
-        const ot = await runPaperOutcomeTick({ poly, settlementLeftMin });
+        for (const snapshotGroup of marketSnapshots) {
+          const groupPoly = snapshotGroup.poly;
+          const groupSettlementMs = groupPoly.ok && groupPoly.market?.endDate
+            ? new Date(groupPoly.market.endDate).getTime()
+            : null;
+          const groupSettlementLeftMin = groupSettlementMs ? (groupSettlementMs - Date.now()) / 60_000 : null;
+          const groupMarketSlug = groupPoly.ok ? String(groupPoly.market?.slug ?? "") : "";
+          const groupMarketStartMs = groupPoly.ok && groupPoly.market?.eventStartTime
+            ? new Date(groupPoly.market.eventStartTime).getTime()
+            : null;
+          const groupPriceToBeat = groupPoly.ok
+            ? updatePriceToBeatState({
+              marketSlug: groupMarketSlug,
+              marketStartMs: groupMarketStartMs,
+              currentPrice
+            })
+            : null;
+          const groupPtbDelta =
+            currentPrice !== null &&
+            groupPriceToBeat !== null &&
+            Number.isFinite(currentPrice) &&
+            Number.isFinite(groupPriceToBeat)
+              ? currentPrice - groupPriceToBeat
+              : null;
+
+          const st = await runPaperStrategyTick({
+            poly: groupPoly,
+            settlementLeftMin: groupSettlementLeftMin,
+            ptbDelta: groupPtbDelta,
+            rsiNow,
+            macd,
+            haNarrative,
+            variants: snapshotGroup.variants
+          });
+          if (st?.line) strategyStatusLine = st.line;
+          if (st?.liveOrderLine) liveOrderStatusLine = st.liveOrderLine;
+        }
+
+        const ot = await runPaperOutcomeTick();
         if (ot?.line) outcomeStatusLine = ot.line;
       }
 

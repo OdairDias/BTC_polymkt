@@ -99,6 +99,7 @@ function extractOrderMeta(result) {
 export async function tryPlaceLiveEntryOrder({
   pgClient,
   entryId,
+  strategyKey,
   marketSlug,
   tokenId,
   limitPrice,
@@ -108,6 +109,7 @@ export async function tryPlaceLiveEntryOrder({
 }) {
   const rowBase = {
     entry_id: entryId,
+    strategy_key: strategyKey ?? "default",
     market_slug: marketSlug,
     token_id: String(tokenId),
     side: "BUY",
@@ -231,6 +233,7 @@ export function shouldAttemptLiveOrder() {
 export async function tryPlaceSniperFokOrder({
   pgClient,
   entryId,
+  strategyKey,
   marketSlug,
   tokenId,
   limitPrice,
@@ -238,6 +241,7 @@ export async function tryPlaceSniperFokOrder({
 }) {
   const rowBase = {
     entry_id: entryId,
+    strategy_key: strategyKey ?? "default",
     market_slug: marketSlug,
     token_id: String(tokenId),
     side: "BUY",
@@ -328,8 +332,11 @@ export async function tryPlaceTakeProfitExitOrder({
   marketSlug,
   tokenId,
   targetPrice,
+  triggerPrice,
   sizeShares,
-  notionalUsd
+  notionalUsd,
+  exitReason = "TAKE_PROFIT",
+  label = "TAKE PROFIT"
 }) {
   const rowBase = {
     entry_id: entryId,
@@ -337,10 +344,11 @@ export async function tryPlaceTakeProfitExitOrder({
     market_slug: marketSlug,
     token_id: String(tokenId),
     side: "SELL",
-    trigger_price: targetPrice,
+    trigger_price: triggerPrice ?? targetPrice,
     exit_price: targetPrice,
     size_shares: sizeShares,
-    notional_usd: notionalUsd
+    notional_usd: notionalUsd,
+    exit_reason: exitReason
   };
 
   try {
@@ -409,7 +417,7 @@ export async function tryPlaceTakeProfitExitOrder({
 
     return {
       ok: true,
-      line: `CLOB TAKE PROFIT ok | sell ${finalShares} @ ${floorPrice} | order ${orderId ?? "(sem id)"}${statusHint}`,
+      line: `CLOB ${label} ok | sell ${finalShares} @ ${floorPrice} | order ${orderId ?? "(sem id)"}${statusHint}`,
       sizeShares: finalShares,
       filledPrice: floorPrice
     };

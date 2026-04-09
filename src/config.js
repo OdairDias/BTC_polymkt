@@ -44,8 +44,10 @@ const DEFAULTS = {
     maxRollingLossUsd: 12,
     minPayoutMultiple: 2.5,
     maxEntryPrice: 0.30,
+    minEntryPrice: 0.01,
     takeProfitEnabled: false,
-    takeProfitPrice: 0.80
+    takeProfitPrice: 0.80,
+    forceExitMinutesLeft: 0
   },
 
   /** Execução CLOB (conta real). Chaves só via env — nunca no código. */
@@ -103,6 +105,9 @@ function sanitizeStrategyVariantKey(value, fallback = "default") {
 function mergeStrategyVariant(base, candidate) {
   const c = candidate && typeof candidate === "object" ? candidate : {};
   const takeProfitPrice = Number(c.takeProfitPrice ?? base.takeProfitPrice);
+  const forceExitMinutesLeft = Number(c.forceExitMinutesLeft ?? base.forceExitMinutesLeft);
+  const minEntryPrice = Number(c.minEntryPrice ?? base.minEntryPrice);
+  const marketWindowMinutes = Number(c.marketWindowMinutes ?? base.marketWindowMinutes);
   return {
     key: sanitizeStrategyVariantKey(c.key, "default"),
     label: String(c.label ?? c.key ?? "default"),
@@ -119,8 +124,15 @@ function mergeStrategyVariant(base, candidate) {
     maxRollingLossUsd: Math.max(0.01, Number(c.maxRollingLossUsd ?? base.maxRollingLossUsd)),
     minPayoutMultiple: Math.max(1, Number(c.minPayoutMultiple ?? base.minPayoutMultiple)),
     maxEntryPrice: Math.max(0.01, Number(c.maxEntryPrice ?? base.maxEntryPrice)),
+    minEntryPrice: Number.isFinite(minEntryPrice) ? Math.max(0.01, Math.min(0.99, minEntryPrice)) : null,
     takeProfitEnabled: c.takeProfitEnabled === undefined ? Boolean(base.takeProfitEnabled) : Boolean(c.takeProfitEnabled),
-    takeProfitPrice: Number.isFinite(takeProfitPrice) ? Math.max(0.01, Math.min(0.99, takeProfitPrice)) : base.takeProfitPrice
+    takeProfitPrice: Number.isFinite(takeProfitPrice) ? Math.max(0.01, Math.min(0.99, takeProfitPrice)) : base.takeProfitPrice,
+    forceExitMinutesLeft: Number.isFinite(forceExitMinutesLeft) && forceExitMinutesLeft > 0 ? forceExitMinutesLeft : null,
+    marketSlug: String(c.marketSlug ?? base.marketSlug ?? "").trim(),
+    marketSlugPrefix: String(c.marketSlugPrefix ?? base.marketSlugPrefix ?? "").trim().toLowerCase(),
+    marketWindowMinutes: Number.isFinite(marketWindowMinutes) && marketWindowMinutes > 0 ? marketWindowMinutes : null,
+    marketSeriesId: String(c.marketSeriesId ?? base.marketSeriesId ?? "").trim(),
+    marketSeriesSlug: String(c.marketSeriesSlug ?? base.marketSeriesSlug ?? "").trim().toLowerCase()
   };
 }
 
@@ -206,6 +218,19 @@ export const CONFIG = {
     maxEntryPrice: Math.max(
       0.01,
       Number(process.env.STRATEGY_MAX_ENTRY_PRICE) || DEFAULTS.strategy.maxEntryPrice
+    ),
+    minEntryPrice: Math.max(
+      0.01,
+      Number(process.env.STRATEGY_MIN_ENTRY_PRICE) || DEFAULTS.strategy.minEntryPrice
+    ),
+    takeProfitEnabled: envBool("STRATEGY_TAKE_PROFIT_ENABLED", DEFAULTS.strategy.takeProfitEnabled),
+    takeProfitPrice: Math.max(
+      0.01,
+      Math.min(0.99, Number(process.env.STRATEGY_TAKE_PROFIT_PRICE) || DEFAULTS.strategy.takeProfitPrice)
+    ),
+    forceExitMinutesLeft: Math.max(
+      0,
+      Number(process.env.STRATEGY_FORCE_EXIT_MINUTES_LEFT) || DEFAULTS.strategy.forceExitMinutesLeft
     )
   },
 
@@ -245,8 +270,15 @@ const baseVariant = {
   maxRollingLossUsd: CONFIG.strategy.maxRollingLossUsd,
   minPayoutMultiple: CONFIG.strategy.minPayoutMultiple,
   maxEntryPrice: CONFIG.strategy.maxEntryPrice,
+  minEntryPrice: CONFIG.strategy.minEntryPrice,
   takeProfitEnabled: CONFIG.strategy.takeProfitEnabled,
-  takeProfitPrice: CONFIG.strategy.takeProfitPrice
+  takeProfitPrice: CONFIG.strategy.takeProfitPrice,
+  forceExitMinutesLeft: CONFIG.strategy.forceExitMinutesLeft,
+  marketSlug: "",
+  marketSlugPrefix: "",
+  marketWindowMinutes: null,
+  marketSeriesId: "",
+  marketSeriesSlug: ""
 };
 
 // Usa as variantes hardcoded em variants.js como fonte primária.

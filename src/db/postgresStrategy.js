@@ -121,6 +121,7 @@ export async function ensureStrategySchema(client) {
       notional_usd NUMERIC,
       clob_order_id TEXT,
       status TEXT NOT NULL,
+      exit_reason TEXT,
       error_message TEXT,
       raw_response JSONB
     );
@@ -140,6 +141,7 @@ export async function ensureStrategySchema(client) {
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
     ALTER TABLE strategy_live_orders ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
     ALTER TABLE strategy_live_exits ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
+    ALTER TABLE strategy_live_exits ADD COLUMN IF NOT EXISTS exit_reason TEXT;
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS exit_price NUMERIC;
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS exit_reason TEXT;
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS exited_early BOOLEAN NOT NULL DEFAULT false;
@@ -318,8 +320,8 @@ export async function insertLiveExit(client, row) {
   await client.query(
     `INSERT INTO strategy_live_exits (
       entry_id, strategy_key, market_slug, token_id, side, trigger_price, exit_price,
-      size_shares, notional_usd, clob_order_id, status, error_message, raw_response
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)`,
+      size_shares, notional_usd, clob_order_id, status, exit_reason, error_message, raw_response
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)`,
     [
       row.entry_id,
       row.strategy_key ?? "default",
@@ -332,6 +334,7 @@ export async function insertLiveExit(client, row) {
       row.notional_usd ?? null,
       row.clob_order_id ?? null,
       row.status,
+      row.exit_reason ?? null,
       row.error_message ?? null,
       row.raw_response != null ? JSON.stringify(row.raw_response) : null
     ]
@@ -483,7 +486,7 @@ export async function getStrategyPerformanceReport(client) {
       SUM(COALESCE(pnl_simulated_usd, 0)) as total_pnl
     FROM strategy_paper_outcomes
     WHERE entry_correct IS NOT NULL
-      AND evaluation_method IN ('gamma_resolved', 'take_profit_hit')
+      AND evaluation_method IN ('gamma_resolved', 'take_profit_hit', 'time_stop_exit')
       AND strategy_key != 'default'
     GROUP BY strategy_key
     ORDER BY total_pnl DESC
