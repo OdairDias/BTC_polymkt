@@ -2,7 +2,7 @@
 
 ## Em uma frase (para leigos)
 
-Esta estrategia compra cedo o lado mais barato do mercado de `15 minutos` e tenta sair com lucro em `0.35`, sem precisar esperar o resultado final.
+Esta estrategia compra cedo o lado mais barato do mercado de `15 minutos` e tenta sair com lucro em `0.44`, sem precisar esperar o resultado final.
 
 ## Objetivo
 
@@ -14,9 +14,9 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 - `decisionMode`: `cheap_revert`
 - Mercado: BTC `15m`
 - Entrada tipica: `entryMinutesLeft=13.75` (cerca de 1m15s depois da abertura)
-- Compra maxima: `targetEntryPrice=0.20`
+- Compra maxima: `targetEntryPrice=0.25`
 - Piso de compra: `minEntryPrice=0.08`
-- Saida no lucro: `takeProfitPrice=0.35`
+- Saida no lucro: `takeProfitPrice=0.44`
 - Saida por tempo: `forceExitMinutesLeft=2.5`
 
 ## O que ela faz (passo a passo)
@@ -25,10 +25,10 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 2. Quando entra na janela configurada, compara os dois lados (`UP` e `DOWN`).
 3. Escolhe o lado mais barato.
 4. So entra se esse lado estiver barato, mas ainda "vivo":
-   - nao pode estar acima de `0.20`
+   - nao pode estar acima de `0.25`
    - nao pode estar abaixo de `0.08`
 5. Depois da entrada, monitora o `best bid` da posicao aberta.
-6. Se o bid bater `0.35`, sai no lucro antes do vencimento.
+6. Se o bid bater `0.44`, sai no lucro antes do vencimento.
 7. Se o alvo nao vier e o tempo estiver acabando, tenta sair quando faltarem `2.5` minutos.
 8. Se nem o alvo nem a saida por tempo conseguirem acontecer, a operacao ainda pode acabar sendo resolvida no fechamento oficial.
 
@@ -46,12 +46,12 @@ Entao a logica aqui e diferente da sniper:
 
 - `entryMinutesLeft=13.75`
   - entra cedo na janela de `15m`, mas nao no primeiro segundo
-- `targetEntryPrice=0.20`
+- `targetEntryPrice=0.25`
   - se o lado barato estiver acima disso, a estrategia faz skip
 - `minEntryPrice=0.08`
   - evita entrar em um lado que ja pode estar esmagado demais
-- `takeProfitPrice=0.35`
-  - alvo inicial mais conservador para comecar a calibracao
+- `takeProfitPrice=0.44`
+  - alvo reajustado de forma proporcional ao novo teto de entrada
 - `forceExitMinutesLeft=2.5`
   - evita carregar a operacao ate a parte mais "travada" do fim do mercado
 

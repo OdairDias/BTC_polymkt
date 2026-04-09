@@ -31,7 +31,7 @@ Este bot tenta combinar esses tres pontos usando dados externos (Binance/Chainli
 - `main_2m`: estrategia legado (da branch `main`) para comparacao A/B, decide por `upMid` vs `downMid` e entra pelo preco de compra.
 - `safe_90s`: variante sniper mais conservadora (preco alvo maior, notional menor e guardas possivelmente mais restritivos).
 - `aggr_35s`: variante sniper mais agressiva (janela menor e preco alvo mais baixo).
-- `cheap_15m_tp35`: estrategia de scalp em mercado `15m`, compra cedo o lado barato e tenta realizar em `0.35` antes do fim.
+- `cheap_15m_tp35`: estrategia de scalp em mercado `15m`, compra cedo o lado barato e tenta realizar em `0.44` antes do fim.
 
 Arquivos:
 
