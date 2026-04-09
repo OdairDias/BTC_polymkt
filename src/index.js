@@ -355,6 +355,22 @@ function getStrategyMarketGroups() {
   return Array.from(groups.values());
 }
 
+function describeStrategyVariant(variant) {
+  const marketRef = variant.marketSlug
+    ? `slug=${variant.marketSlug}`
+    : variant.marketSlugPrefix
+      ? `prefix=${variant.marketSlugPrefix}/${variant.marketWindowMinutes ?? "?"}m`
+      : `series=${CONFIG.polymarket.seriesSlug}`;
+  return [
+    variant.key,
+    `mode=${variant.decisionMode}`,
+    marketRef,
+    `entry=${variant.entryMinutesLeft}m`,
+    `liveEntry=${variant.liveEntryOrderType ?? "FOK"}`,
+    `liveExit=${variant.liveExitOrderType ?? variant.liveEntryOrderType ?? "FOK"}`
+  ].join(" ");
+}
+
 function updatePriceToBeatState({ marketSlug, marketStartMs, currentPrice }) {
   const slug = String(marketSlug ?? "");
   if (!slug) return null;
@@ -564,8 +580,15 @@ async function main() {
       `[strategy] dryRun=${CONFIG.strategy.dryRun} liveArmed=${CONFIG.strategy.liveArmed} ` +
         `privateKey=${pk ? "set" : "missing"} signer=${signerLog} signatureType=${CONFIG.live.signatureType} funder=${funderLog} ` +
         `${relayerHint} ` +
-        `notionalUsd=${CONFIG.strategy.notionalUsd} databaseUrl=${CONFIG.strategy.databaseUrl ? "set" : "missing"}`
+        `notionalUsd=${CONFIG.strategy.notionalUsd} databaseUrl=${CONFIG.strategy.databaseUrl ? "set" : "missing"} ` +
+        `liveStrategyKey=${CONFIG.strategy.liveStrategyKey}`
     );
+    const variantSummary = (Array.isArray(CONFIG.strategy.variants) ? CONFIG.strategy.variants : [])
+      .map(describeStrategyVariant)
+      .join(" | ");
+    if (variantSummary) {
+      console.log(`[strategy] variants ${variantSummary}`);
+    }
   }
 
   const binanceStream = startBinanceTradeStream({ symbol: CONFIG.symbol });

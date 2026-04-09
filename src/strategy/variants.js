@@ -88,6 +88,8 @@ export const STRATEGY_VARIANTS = [
     takeProfitEnabled: true,
     takeProfitPrice: 0.44,
     forceExitMinutesLeft: 2.5,
+    liveEntryOrderType: "FAK",
+    liveExitOrderType: "FAK",
     marketWindowMinutes: 15,
     marketSlugPrefix: "btc-updown-15m",
     marketSeriesSlug: "btc-up-or-down-15m"

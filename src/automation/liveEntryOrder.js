@@ -6,6 +6,10 @@ import { getOrCreateClobClient, isRelayerBuilderConfigured } from "./liveClob.js
 const LIVE_DEBUG = process.env.STRATEGY_LIVE_DEBUG === "true";
 const ERR_MSG_MAX = 8000;
 
+function normalizeMarketOrderType(orderType, fallback = OrderType.FOK) {
+  return orderType === OrderType.FAK || orderType === "FAK" ? OrderType.FAK : fallback;
+}
+
 function explainClobFailure(err) {
   const name = err?.name;
   const hasApiShape =
@@ -237,7 +241,8 @@ export async function tryPlaceSniperFokOrder({
   marketSlug,
   tokenId,
   limitPrice,
-  notionalUsd
+  notionalUsd,
+  orderType = OrderType.FOK
 }) {
   const rowBase = {
     entry_id: entryId,
@@ -254,6 +259,7 @@ export async function tryPlaceSniperFokOrder({
     const clob = await getOrCreateClobClient();
     const tickSize = await clob.getTickSize(String(tokenId));
     const negRisk = await clob.getNegRisk(String(tokenId));
+    const effectiveOrderType = normalizeMarketOrderType(orderType);
 
     const price0 = Number(limitPrice);
     const notional = Number(notionalUsd);
@@ -270,10 +276,10 @@ export async function tryPlaceSniperFokOrder({
       market_slug: marketSlug,
       amountUsd,
       capPrice,
-      f: "SNIPER_FOK",
+      f: `SNIPER_${effectiveOrderType}`,
       funder: funderRaw ? `${funderRaw.slice(0, 6)}...` : null
     };
-    if (LIVE_DEBUG) console.error("[STRATEGY_LIVE_DEBUG] FOK:", JSON.stringify(ctxLog));
+    if (LIVE_DEBUG) console.error("[STRATEGY_LIVE_DEBUG] market order:", JSON.stringify(ctxLog));
 
     const result = await clob.createAndPostMarketOrder(
       {
@@ -281,10 +287,10 @@ export async function tryPlaceSniperFokOrder({
         side: Side.BUY,
         amount: amountUsd,
         price: capPrice,
-        orderType: OrderType.FOK
+        orderType: effectiveOrderType
       },
       { tickSize, negRisk },
-      OrderType.FOK
+      effectiveOrderType
     );
 
     const meta = extractOrderMeta(result);
@@ -303,7 +309,7 @@ export async function tryPlaceSniperFokOrder({
 
     return {
       ok: true,
-      line: `CLOB SNIPER FOK ok | price ${capPrice} | amt $${amountUsd} | order ${orderId ?? "(sem id)"}${statusHint}`,
+      line: `CLOB ${effectiveOrderType} ok | price ${capPrice} | amt $${amountUsd} | order ${orderId ?? "(sem id)"}${statusHint}`,
       sizeShares: finalSize,
       filledPrice: capPrice
     };
@@ -336,7 +342,8 @@ export async function tryPlaceTakeProfitExitOrder({
   sizeShares,
   notionalUsd,
   exitReason = "TAKE_PROFIT",
-  label = "TAKE PROFIT"
+  label = "TAKE PROFIT",
+  orderType = OrderType.FOK
 }) {
   const rowBase = {
     entry_id: entryId,
@@ -355,6 +362,7 @@ export async function tryPlaceTakeProfitExitOrder({
     const clob = await getOrCreateClobClient();
     const tickSize = await clob.getTickSize(String(tokenId));
     const negRisk = await clob.getNegRisk(String(tokenId));
+    const effectiveOrderType = normalizeMarketOrderType(orderType);
 
     const target = Number(targetPrice);
     const wantedShares = Number(sizeShares);
@@ -395,10 +403,10 @@ export async function tryPlaceTakeProfitExitOrder({
         side: Side.SELL,
         amount: finalShares,
         price: floorPrice,
-        orderType: OrderType.FOK
+        orderType: effectiveOrderType
       },
       { tickSize, negRisk },
-      OrderType.FOK
+      effectiveOrderType
     );
 
     const meta = extractOrderMeta(result);
@@ -417,7 +425,7 @@ export async function tryPlaceTakeProfitExitOrder({
 
     return {
       ok: true,
-      line: `CLOB ${label} ok | sell ${finalShares} @ ${floorPrice} | order ${orderId ?? "(sem id)"}${statusHint}`,
+      line: `CLOB ${label} ${effectiveOrderType} ok | sell ${finalShares} @ ${floorPrice} | order ${orderId ?? "(sem id)"}${statusHint}`,
       sizeShares: finalShares,
       filledPrice: floorPrice
     };

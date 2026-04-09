@@ -102,6 +102,11 @@ function sanitizeStrategyVariantKey(value, fallback = "default") {
   return s.replace(/[^a-z0-9_-]/g, "").slice(0, 40) || fallback;
 }
 
+function sanitizeMarketOrderType(value, fallback = "FOK") {
+  const s = String(value ?? "").trim().toUpperCase();
+  return s === "FAK" || s === "FOK" ? s : fallback;
+}
+
 function mergeStrategyVariant(base, candidate) {
   const c = candidate && typeof candidate === "object" ? candidate : {};
   const takeProfitPrice = Number(c.takeProfitPrice ?? base.takeProfitPrice);
@@ -128,6 +133,8 @@ function mergeStrategyVariant(base, candidate) {
     takeProfitEnabled: c.takeProfitEnabled === undefined ? Boolean(base.takeProfitEnabled) : Boolean(c.takeProfitEnabled),
     takeProfitPrice: Number.isFinite(takeProfitPrice) ? Math.max(0.01, Math.min(0.99, takeProfitPrice)) : base.takeProfitPrice,
     forceExitMinutesLeft: Number.isFinite(forceExitMinutesLeft) && forceExitMinutesLeft > 0 ? forceExitMinutesLeft : null,
+    liveEntryOrderType: sanitizeMarketOrderType(c.liveEntryOrderType ?? base.liveEntryOrderType),
+    liveExitOrderType: sanitizeMarketOrderType(c.liveExitOrderType ?? base.liveExitOrderType),
     marketSlug: String(c.marketSlug ?? base.marketSlug ?? "").trim(),
     marketSlugPrefix: String(c.marketSlugPrefix ?? base.marketSlugPrefix ?? "").trim().toLowerCase(),
     marketWindowMinutes: Number.isFinite(marketWindowMinutes) && marketWindowMinutes > 0 ? marketWindowMinutes : null,
@@ -274,6 +281,8 @@ const baseVariant = {
   takeProfitEnabled: CONFIG.strategy.takeProfitEnabled,
   takeProfitPrice: CONFIG.strategy.takeProfitPrice,
   forceExitMinutesLeft: CONFIG.strategy.forceExitMinutesLeft,
+  liveEntryOrderType: "FOK",
+  liveExitOrderType: "FOK",
   marketSlug: "",
   marketSlugPrefix: "",
   marketWindowMinutes: null,

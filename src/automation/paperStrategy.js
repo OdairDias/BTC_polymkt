@@ -243,6 +243,8 @@ export async function runPaperStrategyTick({
       const liveTakeProfitState = liveTakeProfitStateByStrategy.get(key) ?? defaultTakeProfitState();
       const tag = s.dryRun ? "DRY" : "LIVE";
       const takeProfit = getTakeProfitConfig(variant);
+      const liveEntryOrderType = String(variant?.liveEntryOrderType || "FOK").toUpperCase();
+      const liveExitOrderType = String(variant?.liveExitOrderType || liveEntryOrderType || "FOK").toUpperCase();
       let localLiveLine = lastLiveLineByStrategy.get(key) ?? null;
       let localPaperLine = lastPaperLineByStrategy.get(key) ?? null;
 
@@ -432,7 +434,8 @@ export async function runPaperStrategyTick({
                   sizeShares: liveTakeProfitState.sizeShares,
                   notionalUsd: liveTakeProfitState.notionalUsd,
                   exitReason: "TAKE_PROFIT",
-                  label: "TAKE PROFIT"
+                  label: "TAKE PROFIT",
+                  orderType: liveExitOrderType
                 });
                 localLiveLine = liveExit?.line ? `${liveExit.ok ? ANSI_GREEN : ANSI_RED}${liveExit.line}${ANSI_RESET}` : localLiveLine;
                 if (liveExit?.ok) clearTakeProfitState(liveTakeProfitState);
@@ -455,7 +458,8 @@ export async function runPaperStrategyTick({
                     sizeShares: liveTakeProfitState.sizeShares,
                     notionalUsd: liveTakeProfitState.notionalUsd,
                     exitReason: "TIME_STOP",
-                    label: "TIME STOP"
+                    label: "TIME STOP",
+                    orderType: liveExitOrderType
                   });
                   localLiveLine = liveExit?.line ? `${liveExit.ok ? ANSI_GREEN : ANSI_RED}${liveExit.line}${ANSI_RESET}` : localLiveLine;
                   if (liveExit?.ok) clearTakeProfitState(liveTakeProfitState);
@@ -511,11 +515,12 @@ export async function runPaperStrategyTick({
                 pgClient: client,
                 entryId: sniperState.entryId,
                 strategyKey: key,
-                marketSlug: sniperState.marketSlug,
-                tokenId: sniperState.tokenId,
-                limitPrice: sniperState.limitPrice,
-                notionalUsd: sniperState.notionalUsd
-              });
+              marketSlug: sniperState.marketSlug,
+              tokenId: sniperState.tokenId,
+              limitPrice: sniperState.limitPrice,
+              notionalUsd: sniperState.notionalUsd,
+              orderType: liveEntryOrderType
+            });
               localLiveLine = liveEntry?.line ? `${liveEntry.ok ? ANSI_GREEN : ANSI_RED}${liveEntry.line}${ANSI_RESET}` : null;
             } catch (err) {
               localLiveLine = `${ANSI_RED}SNIPER ERRO: ${err.message}${ANSI_RESET}`;
@@ -752,7 +757,8 @@ export async function runPaperStrategyTick({
               marketSlug,
               tokenId,
               limitPrice: entryPrice,
-              notionalUsd: variant.notionalUsd
+              notionalUsd: variant.notionalUsd,
+              orderType: liveEntryOrderType
             });
             localLiveLine = liveEntry?.line ? `${liveEntry.ok ? ANSI_GREEN : ANSI_RED}${liveEntry.line}${ANSI_RESET}` : null;
           } catch (err) {
