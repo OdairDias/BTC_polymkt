@@ -6,7 +6,7 @@ export const STRATEGY_VARIANTS = [
   {
     key: "sniper_45s",
     label: "Sniper 45s (Principal)",
-    enabled: true,
+    enabled: false,
     decisionMode: "sniper_v2",
     entryMinutesLeft: 0.75,
     targetEntryPrice: 0.20,
@@ -22,7 +22,7 @@ export const STRATEGY_VARIANTS = [
   {
     key: "safe_90s",
     label: "Safe 90s (Conservadora)",
-    enabled: true,
+    enabled: false,
     decisionMode: "sniper_v2",
     entryMinutesLeft: 0.90,
     targetEntryPrice: 0.25,
@@ -38,7 +38,7 @@ export const STRATEGY_VARIANTS = [
   {
     key: "aggr_35s",
     label: "Aggressive 35s (Agressiva)",
-    enabled: true,
+    enabled: false,
     decisionMode: "sniper_v2",
     entryMinutesLeft: 0.58,
     targetEntryPrice: 0.18,
@@ -56,7 +56,7 @@ export const STRATEGY_VARIANTS = [
   {
     key: "main_2m",
     label: "Main 2m (Baseline A/B)",
-    enabled: true,
+    enabled: false,
     decisionMode: "main_2m_mid",
     entryMinutesLeft: 2.0,
     targetEntryPrice: 0.50,

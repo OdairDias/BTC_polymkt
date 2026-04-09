@@ -8,6 +8,7 @@ import { startChainlinkPriceStream } from "./data/chainlinkWs.js";
 import { startPolymarketChainlinkPriceStream } from "./data/polymarketLiveWs.js";
 import {
   fetchMarketBySlug,
+  fetchMarketsBySeriesSlug,
   fetchLiveEventsBySeriesId,
   flattenEventMarkets,
   pickLatestLiveMarket,
@@ -301,6 +302,7 @@ function buildMarketConfigKey(config = {}) {
     marketSlugPrefix: config.marketSlugPrefix ?? "",
     marketWindowMinutes: config.marketWindowMinutes ?? null,
     seriesId: config.seriesId ?? "",
+    seriesSlug: config.seriesSlug ?? "",
     autoSelectLatest: config.autoSelectLatest !== false
   });
 }
@@ -326,13 +328,15 @@ function getStrategyMarketGroups() {
         ? Number(variant.marketWindowMinutes)
         : null,
       seriesId: String(variant.marketSeriesId ?? "").trim(),
+      seriesSlug: String(variant.marketSeriesSlug ?? "").trim(),
       autoSelectLatest: true
     };
 
     const hasCustomMarket =
       Boolean(customMarketConfig.marketSlug) ||
       Boolean(customMarketConfig.marketSlugPrefix) ||
-      Boolean(customMarketConfig.seriesId);
+      Boolean(customMarketConfig.seriesId) ||
+      Boolean(customMarketConfig.seriesSlug);
 
     const groupKey = hasCustomMarket ? buildMarketConfigKey(customMarketConfig) : "__default__";
     const existing = groups.get(groupKey) ?? {
@@ -407,6 +411,7 @@ async function resolveCurrentBtcMarket(marketConfig = {}) {
       ? Number(marketConfig.marketWindowMinutes)
       : null,
     seriesId: String(marketConfig.seriesId ?? CONFIG.polymarket.seriesId ?? "").trim(),
+    seriesSlug: String(marketConfig.seriesSlug ?? CONFIG.polymarket.seriesSlug ?? "").trim(),
     autoSelectLatest: marketConfig.autoSelectLatest === undefined
       ? CONFIG.polymarket.autoSelectLatest
       : Boolean(marketConfig.autoSelectLatest)
@@ -424,6 +429,7 @@ async function resolveCurrentBtcMarket(marketConfig = {}) {
   }
 
   let picked = null;
+  const triedSlugs = [];
 
   if (config.marketSlugPrefix && config.marketWindowMinutes) {
     const bucketMs = config.marketWindowMinutes * 60_000;
@@ -440,22 +446,47 @@ async function resolveCurrentBtcMarket(marketConfig = {}) {
       .filter(Boolean);
 
     for (const candidateSlug of new Set(candidates)) {
+      triedSlugs.push(candidateSlug);
       try {
         const market = await fetchMarketBySlug(candidateSlug);
         if (market) {
           picked = market;
+          console.error(`[market] resolved via slug: ${candidateSlug}`);
           break;
         }
       } catch {
         // tenta o proximo slug candidato
       }
     }
+
+    if (!picked) {
+      console.error(`[market] slug candidates not found: ${triedSlugs.join(", ")} — trying series fallback`);
+    }
   }
 
+  // Fallback 1: por seriesId numérico
   if (!picked && config.autoSelectLatest && config.seriesId) {
+    console.error(`[market] fallback seriesId=${config.seriesId}`);
     const events = await fetchLiveEventsBySeriesId({ seriesId: config.seriesId, limit: 25 });
     const markets = flattenEventMarkets(events);
     picked = pickLatestLiveMarket(markets);
+    if (picked) console.error(`[market] resolved via seriesId=${config.seriesId}: ${picked.slug}`);
+  }
+
+  // Fallback 2: por seriesSlug (ex.: "btc-up-or-down-15m")
+  if (!picked && config.autoSelectLatest && config.seriesSlug && config.seriesSlug !== CONFIG.polymarket.seriesSlug) {
+    console.error(`[market] fallback seriesSlug=${config.seriesSlug}`);
+    try {
+      const markets = await fetchMarketsBySeriesSlug({ seriesSlug: config.seriesSlug, limit: 25 });
+      picked = pickLatestLiveMarket(markets);
+      if (picked) console.error(`[market] resolved via seriesSlug=${config.seriesSlug}: ${picked.slug}`);
+    } catch (err) {
+      console.error(`[market] seriesSlug fallback error: ${err?.message ?? err}`);
+    }
+  }
+
+  if (!picked) {
+    console.error(`[market] WARN: market not found for config prefix=${config.marketSlugPrefix} seriesId=${config.seriesId} seriesSlug=${config.seriesSlug}`);
   }
 
   marketCacheByKey.set(cacheKey, { market: picked, fetchedAtMs: now });
