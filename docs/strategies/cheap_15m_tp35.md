@@ -18,6 +18,7 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 - Piso de compra: `minEntryPrice=0.08`
 - Saida no lucro: `takeProfitPrice=0.44`
 - Saida por tempo: `forceExitMinutesLeft=2.5`
+- Tipo de ordem: `liveEntryOrderType=FAK`, `liveExitOrderType=FAK`
 
 ## O que ela faz (passo a passo)
 
@@ -42,27 +43,53 @@ Entao a logica aqui e diferente da sniper:
 - a `cheap_15m_tp35` tenta explorar um exagero de preco mais cedo
 - o foco e "comprar barato e vender melhor", nao necessariamente acertar o vencedor final
 
+## Como o mercado 15m e resolvido
+
+A estrategia usa tres tentativas em ordem:
+
+1. **Slug por timestamp** — gera candidatos no formato `btc-updown-15m-{unix_seconds}` para
+   a janela atual, a anterior e a proxima. Essa e a resolucao mais rapida.
+2. **Fallback por seriesId** — usa o campo `marketSeriesId` da variante (se preenchido).
+3. **Fallback por seriesSlug** — usa `marketSeriesSlug=btc-up-or-down-15m` para buscar o
+   mercado ativo mais recente diretamente na Gamma API. Este e o safety net principal.
+
+Os logs mostram qual caminho foi usado:
+```
+[market] resolved via slug: btc-updown-15m-1775...
+# ou
+[market] slug candidates not found: ... — trying series fallback
+[market] resolved via seriesSlug=btc-up-or-down-15m: btc-updown-15m-...
+# ou
+[market] WARN: market not found for config prefix=btc-updown-15m ...
+```
+
 ## Parametros mais importantes
 
 - `entryMinutesLeft=13.75`
   - entra cedo na janela de `15m`, mas nao no primeiro segundo
 - `targetEntryPrice=0.25`
-  - se o lado barato estiver acima disso, a estrategia faz skip
+  - se o lado barato estiver acima disso, a estrategia faz skip (`SKIP_CHEAP_TOO_EXPENSIVE`)
 - `minEntryPrice=0.08`
-  - evita entrar em um lado que ja pode estar esmagado demais
+  - evita entrar em um lado que ja pode estar esmagado demais (`SKIP_CHEAP_TOO_CHEAP`)
+- `minPayoutMultiple=2.0`
+  - exige payout minimo de 2x, o que implica preco de entrada <= ~0.33
 - `takeProfitPrice=0.44`
-  - alvo reajustado de forma proporcional ao novo teto de entrada
+  - alvo de saida antecipada no bid
 - `forceExitMinutesLeft=2.5`
-  - evita carregar a operacao ate a parte mais "travada" do fim do mercado
+  - saida por tempo quando faltam 2.5 min, evita carregar ate o fim
 
 ## Leituras praticas
 
-- Se entrar pouco, o primeiro ajuste natural costuma ser relaxar o teto de compra.
-- Se entrar bem, mas nao realizar, o primeiro ajuste natural costuma ser calibrar o alvo de saida.
-- Se tomar muitas reversoes tardias, o ponto principal para revisar e a saida por tempo.
+- Se entrar pouco (`SKIP_CHEAP_TOO_EXPENSIVE` frequente): relaxar `targetEntryPrice` e
+  recalibrar `minPayoutMultiple` de forma consistente (ex.: 0.38 / 1.55x).
+- Se entrar bem, mas nao realizar: calibrar `takeProfitPrice` ou antecipar `forceExitMinutesLeft`.
+- Se tomar muitas reversoes tardias: revisar a saida por tempo.
+- Se ver sempre os mesmos precos nos logs (dado congelado): verificar se o mercado 15m
+  esta sendo encontrado; checar as linhas `[market]` no Railway.
 
 ## Observacoes
 
-- Esta estrategia roda em paralelo com as de `5m`, mas observa outro mercado.
+- Esta estrategia roda de forma isolada das de `5m`; observa outro mercado e usa outro grupo de snapshot.
 - O resultado dela precisa ser comparado separadamente no painel e no banco, porque a janela e a dinamica sao diferentes.
 - Como depende de saida antecipada, faz ainda mais sentido acompanhar `fills`, liquidez no bid e `time stop`.
+- O `marketSeriesSlug` em `variants.js` e essencial para o fallback funcionar; nao remover.
