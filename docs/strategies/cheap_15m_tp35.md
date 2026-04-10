@@ -2,7 +2,7 @@
 
 ## Em uma frase (para leigos)
 
-Esta estrategia compra cedo o lado mais barato do mercado de `15 minutos` e tenta sair com lucro em `0.44`, sem precisar esperar o resultado final.
+Esta estrategia compra cedo o lado mais barato do mercado de `15 minutos` e tenta sair com lucro em `0.40`, sem precisar esperar o resultado final.
 
 ## Objetivo
 
@@ -14,9 +14,9 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 - `decisionMode`: `cheap_revert`
 - Mercado: BTC `15m`
 - Entrada tipica: `entryMinutesLeft=13.75` (cerca de 1m15s depois da abertura)
-- Compra maxima: `targetEntryPrice=0.25`
+- Compra maxima: `targetEntryPrice=0.20`
 - Piso de compra: `minEntryPrice=0.08`
-- Saida no lucro: `takeProfitPrice=0.44`
+- Saida no lucro: `takeProfitPrice=0.40`
 - Saida por tempo: `forceExitMinutesLeft=2.5`
 - Tipo de ordem: `liveEntryOrderType=FAK`, `liveExitOrderType=FAK`
 
@@ -26,10 +26,10 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 2. Quando entra na janela configurada, compara os dois lados (`UP` e `DOWN`).
 3. Escolhe o lado mais barato.
 4. So entra se esse lado estiver barato, mas ainda "vivo":
-   - nao pode estar acima de `0.25`
+   - nao pode estar acima de `0.20`
    - nao pode estar abaixo de `0.08`
 5. Depois da entrada, monitora o `best bid` da posicao aberta.
-6. Se o bid bater `0.44`, sai no lucro antes do vencimento.
+6. Se o bid bater `0.40`, sai no lucro antes do vencimento.
 7. Se o alvo nao vier e o tempo estiver acabando, tenta sair quando faltarem `2.5` minutos.
 8. Se nem o alvo nem a saida por tempo conseguirem acontecer, a operacao ainda pode acabar sendo resolvida no fechamento oficial.
 
@@ -67,13 +67,13 @@ Os logs mostram qual caminho foi usado:
 
 - `entryMinutesLeft=13.75`
   - entra cedo na janela de `15m`, mas nao no primeiro segundo
-- `targetEntryPrice=0.25`
+- `targetEntryPrice=0.20`
   - se o lado barato estiver acima disso, a estrategia faz skip (`SKIP_CHEAP_TOO_EXPENSIVE`)
 - `minEntryPrice=0.08`
   - evita entrar em um lado que ja pode estar esmagado demais (`SKIP_CHEAP_TOO_CHEAP`)
 - `minPayoutMultiple=2.0`
   - exige payout minimo de 2x, o que implica preco de entrada <= ~0.33
-- `takeProfitPrice=0.44`
+- `takeProfitPrice=0.40`
   - alvo de saida antecipada no bid
 - `forceExitMinutesLeft=2.5`
   - saida por tempo quando faltam 2.5 min, evita carregar ate o fim
