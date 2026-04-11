@@ -517,13 +517,15 @@ export async function runPaperStrategyTick({
                 pgClient: client,
                 entryId: sniperState.entryId,
                 strategyKey: key,
-              marketSlug: sniperState.marketSlug,
-              tokenId: sniperState.tokenId,
-              limitPrice: sniperState.limitPrice,
-              notionalUsd: sniperState.notionalUsd,
-              orderType: liveEntryOrderType
-            });
-              localLiveLine = liveEntry?.line ? `${liveEntry.ok ? ANSI_GREEN : ANSI_RED}${liveEntry.line}${ANSI_RESET}` : null;
+                marketSlug: sniperState.marketSlug,
+                tokenId: sniperState.tokenId,
+                limitPrice: sniperState.limitPrice,
+                notionalUsd: sniperState.notionalUsd,
+                orderType: liveEntryOrderType
+              });
+              localLiveLine = liveEntry?.line
+                ? `${liveEntry.ok ? ANSI_GREEN : liveEntry.skipped ? ANSI_GRAY : ANSI_RED}${liveEntry.line}${ANSI_RESET}`
+                : null;
             } catch (err) {
               localLiveLine = `${ANSI_RED}SNIPER ERRO: ${err.message}${ANSI_RESET}`;
             }
@@ -797,9 +799,12 @@ export async function runPaperStrategyTick({
               tokenId,
               limitPrice: entryPrice,
               notionalUsd: variant.notionalUsd,
-              orderType: liveEntryOrderType
+              orderType: liveEntryOrderType,
+              maxAcceptablePrice: variant.maxEntryPrice
             });
-            localLiveLine = liveEntry?.line ? `${liveEntry.ok ? ANSI_GREEN : ANSI_RED}${liveEntry.line}${ANSI_RESET}` : null;
+            localLiveLine = liveEntry?.line
+              ? `${liveEntry.ok ? ANSI_GREEN : liveEntry.skipped ? ANSI_GRAY : ANSI_RED}${liveEntry.line}${ANSI_RESET}`
+              : null;
           } catch (err) {
             localLiveLine = `${ANSI_RED}LIVE ENTRY ERRO: ${err.message}${ANSI_RESET}`;
           }

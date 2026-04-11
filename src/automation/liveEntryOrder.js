@@ -59,6 +59,116 @@ function roundDownDecimals(n, places) {
   return Math.floor((n + 1e-12) * f) / f;
 }
 
+function toFiniteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function summarizeBuyableAsks(book, capPrice) {
+  const asks = Array.isArray(book?.asks) ? book.asks : [];
+  let bestAsk = null;
+  let visibleShares = 0;
+  const levels = [];
+  for (const level of asks) {
+    const price = toFiniteNumber(level?.price);
+    const size = toFiniteNumber(level?.size);
+    if (price == null || size == null || size <= 0) continue;
+    if (bestAsk === null || price < bestAsk) bestAsk = price;
+    if (price <= capPrice + 1e-12) {
+      visibleShares += size;
+      levels.push({ price, size });
+    }
+  }
+  levels.sort((a, b) => a.price - b.price);
+  return { bestAsk, visibleShares, levels };
+}
+
+function estimateBuyFillFromBook(levels, amountUsd) {
+  let remainingUsd = Number(amountUsd);
+  let acquiredShares = 0;
+  for (const level of Array.isArray(levels) ? levels : []) {
+    if (!Number.isFinite(remainingUsd) || remainingUsd <= 1e-9) break;
+    const affordableShares = remainingUsd / level.price;
+    const takenShares = Math.min(level.size, affordableShares);
+    if (!Number.isFinite(takenShares) || takenShares <= 0) continue;
+    acquiredShares += takenShares;
+    remainingUsd -= takenShares * level.price;
+  }
+  return {
+    acquiredShares,
+    spentUsd: Math.max(0, Number(amountUsd) - Math.max(0, remainingUsd)),
+    remainingUsd: Math.max(0, remainingUsd)
+  };
+}
+
+async function prepareImmediateBuyExecution({
+  clob,
+  tokenId,
+  requestedPrice,
+  maxAcceptablePrice,
+  amountUsd,
+  tickSize,
+  orderType
+}) {
+  const tickDec = decimalsFromTickString(tickSize);
+  const requestedCap = Number(roundDownDecimals(Number(requestedPrice), tickDec).toFixed(tickDec));
+  const maxCapRaw = toFiniteNumber(maxAcceptablePrice);
+  const liftedCap =
+    orderType === OrderType.FAK && maxCapRaw != null && maxCapRaw > 0
+      ? Math.max(requestedCap, maxCapRaw)
+      : requestedCap;
+  const capPrice = Number(roundDownDecimals(liftedCap, tickDec).toFixed(tickDec));
+  const fallbackShares = Number(roundDownDecimals(Number(amountUsd) / capPrice, 2).toFixed(2));
+  try {
+    const book = await clob.getOrderBook(String(tokenId));
+    const { bestAsk, visibleShares, levels } = summarizeBuyableAsks(book, capPrice);
+    const fillEstimate = estimateBuyFillFromBook(levels, amountUsd);
+    const requiredShares = Number(roundDownDecimals(fillEstimate.acquiredShares, 2).toFixed(2));
+
+    if (bestAsk == null) {
+      return {
+        ok: false,
+        capPrice,
+        reason: `sem asks visiveis no book (cap ${capPrice.toFixed(tickDec)})`,
+        bestAsk: null,
+        visibleShares: 0,
+        requiredShares: 0
+      };
+    }
+    if (bestAsk > capPrice + 1e-12) {
+      return {
+        ok: false,
+        capPrice,
+        reason: `best ask ${bestAsk.toFixed(tickDec)} > cap ${capPrice.toFixed(tickDec)}`,
+        bestAsk,
+        visibleShares,
+        requiredShares
+      };
+    }
+    if (fillEstimate.spentUsd + 1e-9 < amountUsd || requiredShares < 0.01) {
+      return {
+        ok: false,
+        capPrice,
+        reason: `liquidez visivel ${visibleShares.toFixed(2)} < necessario ${requiredShares.toFixed(2)} shares ate ${capPrice.toFixed(tickDec)}`,
+        bestAsk,
+        visibleShares,
+        requiredShares
+      };
+    }
+
+    return { ok: true, capPrice, bestAsk, visibleShares, requiredShares };
+  } catch (err) {
+    return {
+      ok: null,
+      capPrice,
+      reason: err?.message ?? String(err),
+      bestAsk: null,
+      visibleShares: null,
+      requiredShares: fallbackShares
+    };
+  }
+}
+
 function capPriceAndAmountUsd(limitPrice, notionalUsd, tickSizeStr) {
   const tickDec = decimalsFromTickString(tickSizeStr);
   const capPrice = Number(roundDownDecimals(Number(limitPrice), tickDec).toFixed(tickDec));
@@ -242,7 +352,8 @@ export async function tryPlaceSniperFokOrder({
   tokenId,
   limitPrice,
   notionalUsd,
-  orderType = OrderType.FOK
+  orderType = OrderType.FOK,
+  maxAcceptablePrice = null
 }) {
   const rowBase = {
     entry_id: entryId,
@@ -267,15 +378,49 @@ export async function tryPlaceSniperFokOrder({
       throw new Error("limitPrice ou notionalUsd invalidos para CLOB");
     }
 
-    const { capPrice, amountUsd, sizeShares: finalSize } = capPriceAndAmountUsd(price0, notional, tickSize);
+    const { capPrice: requestedCap, amountUsd } = capPriceAndAmountUsd(price0, notional, tickSize);
+    const executionWindow = await prepareImmediateBuyExecution({
+      clob,
+      tokenId,
+      requestedPrice: requestedCap,
+      maxAcceptablePrice,
+      amountUsd,
+      tickSize,
+      orderType: effectiveOrderType
+    });
+    const capPrice = executionWindow.capPrice;
+    const finalSize = executionWindow.requiredShares;
     rowBase.limit_price = capPrice;
     rowBase.size_shares = finalSize;
+
+    if (executionWindow.ok === false) {
+      const skipLine = `CLOB ${effectiveOrderType} skip: ${executionWindow.reason}`;
+      await insertLiveOrder(pgClient, {
+        ...rowBase,
+        clob_order_id: null,
+        status: "SKIPPED",
+        error_message: executionWindow.reason.slice(0, ERR_MSG_MAX),
+        raw_response: {
+          kind: "PreflightSkip",
+          requestedCap,
+          effectiveCap: capPrice,
+          bestAsk: executionWindow.bestAsk,
+          visibleShares: executionWindow.visibleShares,
+          requiredShares: executionWindow.requiredShares,
+          maxAcceptablePrice: maxAcceptablePrice ?? null
+        }
+      });
+      return { ok: false, skipped: true, line: skipLine };
+    }
 
     const funderRaw = (CONFIG.live.funderAddress || "").trim();
     const ctxLog = {
       market_slug: marketSlug,
       amountUsd,
       capPrice,
+      requestedCap,
+      bestAsk: executionWindow.bestAsk,
+      visibleShares: executionWindow.visibleShares,
       f: `SNIPER_${effectiveOrderType}`,
       funder: funderRaw ? `${funderRaw.slice(0, 6)}...` : null
     };
@@ -327,7 +472,7 @@ export async function tryPlaceSniperFokOrder({
     } catch {
       // ignore duplicate insert etc.
     }
-    return { ok: false, line: `CLOB Sniper erro: ${msg}` };
+    return { ok: false, skipped: false, line: `CLOB Sniper erro: ${msg}` };
   }
 }
 

@@ -13,9 +13,10 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 - `key`: `cheap_15m_tp35`
 - `decisionMode`: `cheap_revert`
 - Mercado: BTC `15m`
-- Entrada tipica: `entryMinutesLeft=13.75` (cerca de 1m15s depois da abertura)
+- Inicio da janela de entrada: `entryMinutesLeft=13.75` (cerca de 1m15s depois da abertura)
+- Fim da janela de entrada: `entryCloseMinutesLeft=5.0`
 - Compra maxima: `targetEntryPrice=0.20`
-- Piso de compra: `minEntryPrice=0.08`
+- Piso de compra: `minEntryPrice=0.05`
 - Saida no lucro: `takeProfitPrice=0.40`
 - Saida por tempo: `forceExitMinutesLeft=2.5`
 - Tipo de ordem: `liveEntryOrderType=FAK`, `liveExitOrderType=FAK`
@@ -23,15 +24,17 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 ## O que ela faz (passo a passo)
 
 1. Espera o mercado `15m` abrir e deixa passar um pequeno trecho inicial.
-2. Quando entra na janela configurada, compara os dois lados (`UP` e `DOWN`).
-3. Escolhe o lado mais barato.
-4. So entra se esse lado estiver barato, mas ainda "vivo":
+2. A partir de `13.75` minutos restantes, monitora continuamente o mercado ate `5.0` minutos restantes.
+3. Em cada tick dentro dessa janela, compara os dois lados (`UP` e `DOWN`).
+4. Escolhe o lado mais barato.
+5. So entra se esse lado estiver barato, mas ainda "vivo":
    - nao pode estar acima de `0.20`
-   - nao pode estar abaixo de `0.08`
-5. Depois da entrada, monitora o `best bid` da posicao aberta.
-6. Se o bid bater `0.40`, sai no lucro antes do vencimento.
-7. Se o alvo nao vier e o tempo estiver acabando, tenta sair quando faltarem `2.5` minutos.
-8. Se nem o alvo nem a saida por tempo conseguirem acontecer, a operacao ainda pode acabar sendo resolvida no fechamento oficial.
+   - nao pode estar abaixo de `0.05`
+6. No live, a entrada FAK faz um preflight no book e pode virar `skip` se nao houver asks/lote suficiente ate o preco aceito naquele instante.
+7. Depois da entrada, monitora o `best bid` da posicao aberta.
+8. Se o bid bater `0.40`, sai no lucro antes do vencimento.
+9. Se o alvo nao vier e o tempo estiver acabando, tenta sair quando faltarem `2.5` minutos.
+10. Se nem o alvo nem a saida por tempo conseguirem acontecer, a operacao ainda pode acabar sendo resolvida no fechamento oficial.
 
 ## Ideia por tras
 
@@ -66,10 +69,12 @@ Os logs mostram qual caminho foi usado:
 ## Parametros mais importantes
 
 - `entryMinutesLeft=13.75`
-  - entra cedo na janela de `15m`, mas nao no primeiro segundo
+  - abre a janela de entrada cedo, mas nao no primeiro segundo
+- `entryCloseMinutesLeft=5.0`
+  - permite novas entradas ate faltarem `5` minutos para o fechamento
 - `targetEntryPrice=0.20`
   - se o lado barato estiver acima disso, a estrategia faz skip (`SKIP_CHEAP_TOO_EXPENSIVE`)
-- `minEntryPrice=0.08`
+- `minEntryPrice=0.05`
   - evita entrar em um lado que ja pode estar esmagado demais (`SKIP_CHEAP_TOO_CHEAP`)
 - `minPayoutMultiple=2.0`
   - exige payout minimo de 2x, o que implica preco de entrada <= ~0.33
@@ -93,3 +98,4 @@ Os logs mostram qual caminho foi usado:
 - O resultado dela precisa ser comparado separadamente no painel e no banco, porque a janela e a dinamica sao diferentes.
 - Como depende de saida antecipada, faz ainda mais sentido acompanhar `fills`, liquidez no bid e `time stop`.
 - O `marketSeriesSlug` em `variants.js` e essencial para o fallback funcionar; nao remover.
+- A estrategia continua limitada a uma entrada por mercado; se um tick for `skip`, ela pode tentar de novo enquanto a janela ainda estiver aberta.
