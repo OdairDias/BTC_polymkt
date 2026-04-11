@@ -31,6 +31,7 @@ const paperTakeProfitStateByStrategy = new Map();
 const liveTakeProfitStateByStrategy = new Map();
 const lastPaperLineByStrategy = new Map();
 const lastLiveLineByStrategy = new Map();
+const enteredMarketsByStrategy = new Map();
 
 function getVariants(variantSubset = null) {
   if (Array.isArray(variantSubset) && variantSubset.length) {
@@ -183,6 +184,7 @@ export function resetStrategyDbStateForTests() {
   liveTakeProfitStateByStrategy.clear();
   lastPaperLineByStrategy.clear();
   lastLiveLineByStrategy.clear();
+  enteredMarketsByStrategy.clear();
 }
 
 export async function runPaperStrategyTick({
@@ -579,12 +581,28 @@ export async function runPaperStrategyTick({
         localPaperLine = `${ANSI_GRAY}${tag} NO_FILL${ANSI_RESET}`;
       }
 
-      if (!shouldFireStrategySnapshot(trail, marketSlug, settlementLeftMin, variant.entryMinutesLeft)) {
+      const isContinuous = variant.decisionMode === "cheap_revert";
+      const enteredSet = enteredMarketsByStrategy.get(key) ?? new Set();
+
+      let shouldEval = false;
+      if (isContinuous) {
+        const t = settlementLeftMin;
+        const w = variant.entryMinutesLeft;
+        const c = variant.entryCloseMinutesLeft ?? 5.0; // Padrão 5 minutos caso não informado
+        if (t != null && t <= w && t >= c && !enteredSet.has(marketSlug)) {
+          shouldEval = true;
+        }
+      } else {
+        shouldEval = shouldFireStrategySnapshot(trail, marketSlug, settlementLeftMin, variant.entryMinutesLeft);
+      }
+
+      if (!shouldEval) {
         sniperStateByStrategy.set(key, sniperState);
         paperTakeProfitStateByStrategy.set(key, paperTakeProfitState);
         liveTakeProfitStateByStrategy.set(key, liveTakeProfitState);
         lastLiveLineByStrategy.set(key, localLiveLine);
         lastPaperLineByStrategy.set(key, localPaperLine);
+        enteredMarketsByStrategy.set(key, enteredSet);
         continue;
       }
 
@@ -611,6 +629,7 @@ export async function runPaperStrategyTick({
         liveTakeProfitStateByStrategy.set(key, liveTakeProfitState);
         lastLiveLineByStrategy.set(key, localLiveLine);
         lastPaperLineByStrategy.set(key, localPaperLine);
+        enteredMarketsByStrategy.set(key, enteredSet);
         continue;
       }
 
@@ -690,6 +709,26 @@ export async function runPaperStrategyTick({
           simulatedShares = null;
           entryPrice = null;
         }
+      }
+
+      if (isContinuous && !effectiveDecision.side) {
+        // Em monitoramento contínuo, se não gerou entrada (ex: SKIP_TOO_EXPENSIVE), não registramos no DB.
+        // Apenas atualizamos a linha do console para mostrar que estamos aguardando o preço.
+        localLiveLine = localLiveLine || null; // mantem asymetria/warnings
+        localPaperLine = `${ANSI_GRAY}${tag} MONITOR (${variant.decisionMode}): aguardando opp (${effectiveDecision.result})${ANSI_RESET}`;
+        sniperStateByStrategy.set(key, sniperState);
+        paperTakeProfitStateByStrategy.set(key, paperTakeProfitState);
+        liveTakeProfitStateByStrategy.set(key, liveTakeProfitState);
+        lastLiveLineByStrategy.set(key, localLiveLine);
+        lastPaperLineByStrategy.set(key, localPaperLine);
+        enteredMarketsByStrategy.set(key, enteredSet);
+        continue;
+      }
+
+      if (isContinuous && (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN")) {
+        // Achamos uma oportunidade válida, registramos como mercado já acionado para parar de avaliar.
+        enteredSet.add(marketSlug);
+        enteredMarketsByStrategy.set(key, enteredSet);
       }
 
       const endDate = poly.market.endDate ? new Date(poly.market.endDate) : null;
