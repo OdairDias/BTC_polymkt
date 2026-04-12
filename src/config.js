@@ -47,6 +47,7 @@ const DEFAULTS = {
     minEntryPrice: 0.01,
     takeProfitEnabled: false,
     takeProfitPrice: 0.80,
+    grossProfitTargetUsd: 0,
     forceExitMinutesLeft: 0
   },
 
@@ -110,6 +111,7 @@ function sanitizeMarketOrderType(value, fallback = "FOK") {
 function mergeStrategyVariant(base, candidate) {
   const c = candidate && typeof candidate === "object" ? candidate : {};
   const takeProfitPrice = Number(c.takeProfitPrice ?? base.takeProfitPrice);
+  const grossProfitTargetUsd = Number(c.grossProfitTargetUsd ?? base.grossProfitTargetUsd);
   const forceExitMinutesLeft = Number(c.forceExitMinutesLeft ?? base.forceExitMinutesLeft);
   const minEntryPrice = Number(c.minEntryPrice ?? base.minEntryPrice);
   const marketWindowMinutes = Number(c.marketWindowMinutes ?? base.marketWindowMinutes);
@@ -132,6 +134,7 @@ function mergeStrategyVariant(base, candidate) {
     minEntryPrice: Number.isFinite(minEntryPrice) ? Math.max(0.01, Math.min(0.99, minEntryPrice)) : null,
     takeProfitEnabled: c.takeProfitEnabled === undefined ? Boolean(base.takeProfitEnabled) : Boolean(c.takeProfitEnabled),
     takeProfitPrice: Number.isFinite(takeProfitPrice) ? Math.max(0.01, Math.min(0.99, takeProfitPrice)) : base.takeProfitPrice,
+    grossProfitTargetUsd: Number.isFinite(grossProfitTargetUsd) && grossProfitTargetUsd > 0 ? Math.max(0.01, grossProfitTargetUsd) : null,
     forceExitMinutesLeft: Number.isFinite(forceExitMinutesLeft) && forceExitMinutesLeft > 0 ? forceExitMinutesLeft : null,
     entryCloseMinutesLeft: Number.isFinite(Number(c.entryCloseMinutesLeft)) ? Number(c.entryCloseMinutesLeft) : base.entryCloseMinutesLeft,
     liveEntryOrderType: sanitizeMarketOrderType(c.liveEntryOrderType ?? base.liveEntryOrderType),
@@ -236,6 +239,10 @@ export const CONFIG = {
       0.01,
       Math.min(0.99, Number(process.env.STRATEGY_TAKE_PROFIT_PRICE) || DEFAULTS.strategy.takeProfitPrice)
     ),
+    grossProfitTargetUsd: Math.max(
+      0,
+      Number(process.env.STRATEGY_GROSS_PROFIT_TARGET_USD) || DEFAULTS.strategy.grossProfitTargetUsd
+    ),
     forceExitMinutesLeft: Math.max(
       0,
       Number(process.env.STRATEGY_FORCE_EXIT_MINUTES_LEFT) || DEFAULTS.strategy.forceExitMinutesLeft
@@ -281,6 +288,7 @@ const baseVariant = {
   minEntryPrice: CONFIG.strategy.minEntryPrice,
   takeProfitEnabled: CONFIG.strategy.takeProfitEnabled,
   takeProfitPrice: CONFIG.strategy.takeProfitPrice,
+  grossProfitTargetUsd: CONFIG.strategy.grossProfitTargetUsd,
   forceExitMinutesLeft: CONFIG.strategy.forceExitMinutesLeft,
   entryCloseMinutesLeft: null,
   liveEntryOrderType: "FOK",

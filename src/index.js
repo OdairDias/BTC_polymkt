@@ -370,9 +370,10 @@ function describeStrategyVariant(variant) {
     `mode=${variant.decisionMode}`,
     marketRef,
     `entry=${variant.entryMinutesLeft}m`,
+    variant.grossProfitTargetUsd ? `gp=$${variant.grossProfitTargetUsd}` : null,
     `liveEntry=${variant.liveEntryOrderType ?? "FOK"}`,
     `liveExit=${variant.liveExitOrderType ?? variant.liveEntryOrderType ?? "FOK"}`
-  ].join(" ");
+  ].filter(Boolean).join(" ");
 }
 
 function updatePriceToBeatState({ marketSlug, marketStartMs, currentPrice }) {

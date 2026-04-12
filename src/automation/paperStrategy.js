@@ -56,6 +56,7 @@ function getVariants(variantSubset = null) {
       minEntryPrice: CONFIG.strategy.minEntryPrice,
       takeProfitEnabled: CONFIG.strategy.takeProfitEnabled,
       takeProfitPrice: CONFIG.strategy.takeProfitPrice,
+      grossProfitTargetUsd: CONFIG.strategy.grossProfitTargetUsd,
       forceExitMinutesLeft: CONFIG.strategy.forceExitMinutesLeft
     }
   ];
@@ -117,13 +118,17 @@ function isAnchoredSniperVariant(variant) {
 function getTakeProfitConfig(variant) {
   const takeProfitEnabled = Boolean(variant?.takeProfitEnabled);
   const price = Number(variant?.takeProfitPrice);
+  const grossProfitTargetUsd = Number(variant?.grossProfitTargetUsd);
   const forceExitMinutesLeft = Number(variant?.forceExitMinutesLeft);
   const timeStopEnabled = Number.isFinite(forceExitMinutesLeft) && forceExitMinutesLeft > 0;
   const priceEnabled = takeProfitEnabled && Number.isFinite(price) && price > 0 && price < 1;
+  const grossProfitEnabled = Number.isFinite(grossProfitTargetUsd) && grossProfitTargetUsd > 0;
   return {
-    enabled: priceEnabled || timeStopEnabled,
+    enabled: priceEnabled || grossProfitEnabled || timeStopEnabled,
     takeProfitEnabled: priceEnabled,
     price,
+    grossProfitEnabled,
+    grossProfitTargetUsd: grossProfitEnabled ? grossProfitTargetUsd : null,
     timeStopEnabled,
     forceExitMinutesLeft: timeStopEnabled ? forceExitMinutesLeft : null
   };
@@ -171,6 +176,20 @@ function sideBestBid(poly, side) {
 function toFiniteNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
+}
+
+function computeGrossExitSnapshot({ bidPrice, sizeShares, notionalUsd }) {
+  const bid = toFiniteNumber(bidPrice);
+  const shares = toFiniteNumber(sizeShares);
+  const cost = toFiniteNumber(notionalUsd);
+  if (bid == null || shares == null || shares <= 0 || cost == null || cost <= 0) {
+    return { grossExitUsd: null, grossProfitUsd: null };
+  }
+  const grossExitUsd = bid * shares;
+  return {
+    grossExitUsd,
+    grossProfitUsd: grossExitUsd - cost
+  };
 }
 
 export function resetStrategyDbStateForTests() {
@@ -314,7 +333,13 @@ export async function runPaperStrategyTick({
               liquiditySide: "bid"
             });
             const targetPrice = toFiniteNumber(paperTakeProfitState.targetPrice);
+            const grossProfitTargetUsd = toFiniteNumber(takeProfit.grossProfitTargetUsd);
             const forceExitMinutesLeft = toFiniteNumber(paperTakeProfitState.forceExitMinutesLeft);
+            const grossExit = computeGrossExitSnapshot({
+              bidPrice,
+              sizeShares: paperTakeProfitState.sizeShares,
+              notionalUsd: paperTakeProfitState.notionalUsd
+            });
             const timeStopDue =
               forceExitMinutesLeft != null &&
               settlementLeftMin != null &&
@@ -360,6 +385,57 @@ export async function runPaperStrategyTick({
               clearTakeProfitState(paperTakeProfitState);
             } else if (targetPrice != null && bidPrice != null && bidPrice >= targetPrice && !hasLiquidity) {
               localPaperLine = `${ANSI_GRAY}${tag} TP aguardando liquidez @ ${targetPrice.toFixed(2)}${ANSI_RESET}`;
+            } else if (
+              grossProfitTargetUsd != null &&
+              grossExit.grossProfitUsd != null &&
+              grossExit.grossProfitUsd >= grossProfitTargetUsd &&
+              bidPrice != null &&
+              hasLiquidity
+            ) {
+              const realized = computeRealizedExitPnl({
+                entryPrice: paperTakeProfitState.entryPrice,
+                exitPrice: bidPrice,
+                notionalUsd: paperTakeProfitState.notionalUsd
+              });
+              await insertPaperOutcome(client, {
+                entry_id: paperTakeProfitState.entryId,
+                strategy_key: key,
+                market_slug: marketSlug,
+                seconds_left_at_eval: Math.max(0, Number(settlementLeftMin || 0) * 60),
+                evaluation_method: "gross_profit_exit",
+                up_mid: upMid,
+                down_mid: downMid,
+                up_best_bid: upBook.bestBid ?? null,
+                up_best_ask: upBook.bestAsk ?? null,
+                down_best_bid: downBook.bestBid ?? null,
+                down_best_ask: downBook.bestAsk ?? null,
+                inferred_winner: paperTakeProfitState.side,
+                official_winner: null,
+                outcome_code: "EXIT_GROSS_PROFIT",
+                official_resolution_status: null,
+                official_resolution_source: null,
+                official_resolved_at: null,
+                official_outcome_prices_json: null,
+                official_price_to_beat: null,
+                official_price_at_close: null,
+                entry_chosen_side: paperTakeProfitState.side,
+                entry_correct: true,
+                pnl_simulated_usd: realized.pnl,
+                dry_run: s.dryRun,
+                exit_price: bidPrice,
+                exit_reason: "GROSS_PROFIT",
+                exited_early: true
+              });
+              localPaperLine = `${ANSI_GREEN}${tag} GROSS PROFIT ${paperTakeProfitState.side} @${bidPrice.toFixed(3)} (gross +$${grossExit.grossProfitUsd.toFixed(2)})${ANSI_RESET}`;
+              clearTakeProfitState(paperTakeProfitState);
+            } else if (
+              grossProfitTargetUsd != null &&
+              grossExit.grossProfitUsd != null &&
+              grossExit.grossProfitUsd >= grossProfitTargetUsd &&
+              bidPrice != null &&
+              !hasLiquidity
+            ) {
+              localPaperLine = `${ANSI_GRAY}${tag} GROSS PROFIT tocou, mas sem liquidez suficiente no bid${ANSI_RESET}`;
             } else if (timeStopDue) {
               if (bidPrice != null && bidPrice > 0 && hasLiquidity) {
                 const realized = computeRealizedExitPnl({
@@ -419,15 +495,23 @@ export async function runPaperStrategyTick({
               liquiditySide: "bid"
             });
             const targetPrice = toFiniteNumber(liveTakeProfitState.targetPrice);
+            const grossProfitTargetUsd = toFiniteNumber(takeProfit.grossProfitTargetUsd);
             const forceExitMinutesLeft = toFiniteNumber(liveTakeProfitState.forceExitMinutesLeft);
+            const grossExit = computeGrossExitSnapshot({
+              bidPrice,
+              sizeShares: liveTakeProfitState.sizeShares,
+              notionalUsd: liveTakeProfitState.notionalUsd
+            });
             const timeStopDue =
               forceExitMinutesLeft != null &&
               settlementLeftMin != null &&
               Number.isFinite(Number(settlementLeftMin)) &&
               Number(settlementLeftMin) <= forceExitMinutesLeft;
             const targetText = targetPrice != null ? `TP >= ${targetPrice.toFixed(2)}` : "sem TP";
+            const grossProfitText =
+              grossProfitTargetUsd != null ? ` | gross >= $${grossProfitTargetUsd.toFixed(2)}` : "";
             const timeStopText = forceExitMinutesLeft != null ? ` | stop ${forceExitMinutesLeft.toFixed(2)}m` : "";
-            localLiveLine = `${ANSI_YELLOW}EXIT monitor ${liveTakeProfitState.side} | ${targetText}${timeStopText} (bid ${bidPrice != null ? bidPrice.toFixed(3) : "-"})${ANSI_RESET}`;
+            localLiveLine = `${ANSI_YELLOW}EXIT monitor ${liveTakeProfitState.side} | ${targetText}${grossProfitText}${timeStopText} (bid ${bidPrice != null ? bidPrice.toFixed(3) : "-"})${ANSI_RESET}`;
 
             if (targetPrice != null && bidPrice != null && bidPrice >= targetPrice && hasLiquidity) {
               try {
@@ -452,6 +536,41 @@ export async function runPaperStrategyTick({
               }
             } else if (targetPrice != null && bidPrice != null && bidPrice >= targetPrice && !hasLiquidity) {
               localLiveLine = `${ANSI_GRAY}TP tocou preco, mas sem liquidez suficiente no bid${ANSI_RESET}`;
+            } else if (
+              grossProfitTargetUsd != null &&
+              grossExit.grossProfitUsd != null &&
+              grossExit.grossProfitUsd >= grossProfitTargetUsd &&
+              bidPrice != null &&
+              hasLiquidity
+            ) {
+              try {
+                const liveExit = await tryPlaceTakeProfitExitOrder({
+                  pgClient: client,
+                  entryId: liveTakeProfitState.entryId,
+                  strategyKey: key,
+                  marketSlug,
+                  tokenId: liveTakeProfitState.tokenId,
+                  targetPrice: bidPrice,
+                  triggerPrice: bidPrice,
+                  sizeShares: liveTakeProfitState.sizeShares,
+                  notionalUsd: liveTakeProfitState.notionalUsd,
+                  exitReason: "GROSS_PROFIT",
+                  label: "GROSS PROFIT",
+                  orderType: liveExitOrderType
+                });
+                localLiveLine = liveExit?.line ? `${liveExit.ok ? ANSI_GREEN : ANSI_RED}${liveExit.line}${ANSI_RESET}` : localLiveLine;
+                if (liveExit?.ok) clearTakeProfitState(liveTakeProfitState);
+              } catch (err) {
+                localLiveLine = `${ANSI_RED}GROSS PROFIT LIVE ERRO: ${err.message}${ANSI_RESET}`;
+              }
+            } else if (
+              grossProfitTargetUsd != null &&
+              grossExit.grossProfitUsd != null &&
+              grossExit.grossProfitUsd >= grossProfitTargetUsd &&
+              bidPrice != null &&
+              !hasLiquidity
+            ) {
+              localLiveLine = `${ANSI_GRAY}GROSS PROFIT tocou, mas sem liquidez suficiente no bid${ANSI_RESET}`;
             } else if (timeStopDue) {
               if (bidPrice != null && bidPrice > 0 && hasLiquidity) {
                 try {
