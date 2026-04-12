@@ -255,6 +255,60 @@ export async function insertPaperSignal(client, row) {
   return { inserted: false };
 }
 
+export async function ensurePaperSignal(client, row) {
+  const res = await client.query(
+    `INSERT INTO strategy_paper_signals (
+      strategy_key, market_slug, condition_id, market_end_at, minutes_left,
+      up_mid, down_mid, up_buy, down_buy,
+      up_best_bid, up_best_ask, down_best_bid, down_best_ask,
+      result_code, chosen_side, notional_usd, entry_price, simulated_shares, dry_run
+    ) VALUES (
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
+    )
+    ON CONFLICT (strategy_key, market_slug) DO UPDATE SET
+      condition_id = COALESCE(EXCLUDED.condition_id, strategy_paper_signals.condition_id),
+      market_end_at = COALESCE(EXCLUDED.market_end_at, strategy_paper_signals.market_end_at),
+      minutes_left = COALESCE(EXCLUDED.minutes_left, strategy_paper_signals.minutes_left),
+      up_mid = COALESCE(EXCLUDED.up_mid, strategy_paper_signals.up_mid),
+      down_mid = COALESCE(EXCLUDED.down_mid, strategy_paper_signals.down_mid),
+      up_buy = COALESCE(EXCLUDED.up_buy, strategy_paper_signals.up_buy),
+      down_buy = COALESCE(EXCLUDED.down_buy, strategy_paper_signals.down_buy),
+      up_best_bid = COALESCE(EXCLUDED.up_best_bid, strategy_paper_signals.up_best_bid),
+      up_best_ask = COALESCE(EXCLUDED.up_best_ask, strategy_paper_signals.up_best_ask),
+      down_best_bid = COALESCE(EXCLUDED.down_best_bid, strategy_paper_signals.down_best_bid),
+      down_best_ask = COALESCE(EXCLUDED.down_best_ask, strategy_paper_signals.down_best_ask),
+      result_code = COALESCE(EXCLUDED.result_code, strategy_paper_signals.result_code),
+      chosen_side = EXCLUDED.chosen_side,
+      notional_usd = COALESCE(EXCLUDED.notional_usd, strategy_paper_signals.notional_usd),
+      entry_price = EXCLUDED.entry_price,
+      simulated_shares = EXCLUDED.simulated_shares,
+      dry_run = EXCLUDED.dry_run
+    RETURNING id`,
+    [
+      row.strategy_key ?? "default",
+      row.market_slug,
+      row.condition_id ?? null,
+      row.market_end_at ?? null,
+      row.minutes_left,
+      row.up_mid ?? null,
+      row.down_mid ?? null,
+      row.up_buy ?? null,
+      row.down_buy ?? null,
+      row.up_best_bid ?? null,
+      row.up_best_ask ?? null,
+      row.down_best_bid ?? null,
+      row.down_best_ask ?? null,
+      row.result_code,
+      row.chosen_side ?? null,
+      row.notional_usd,
+      row.entry_price ?? null,
+      row.simulated_shares ?? null,
+      row.dry_run
+    ]
+  );
+  return { id: res.rows[0]?.id ?? null };
+}
+
 export async function updatePaperSignalExecution(client, row) {
   const res = await client.query(
     `UPDATE strategy_paper_signals
@@ -298,7 +352,19 @@ export async function insertLiveOrder(client, row) {
       entry_id, strategy_key, market_slug, token_id, side, limit_price, size_shares, notional_usd,
       clob_order_id, status, error_message, raw_response
     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12::jsonb)
-    ON CONFLICT (entry_id) DO NOTHING`,
+    ON CONFLICT (entry_id) DO UPDATE SET
+      created_at = now(),
+      strategy_key = EXCLUDED.strategy_key,
+      market_slug = EXCLUDED.market_slug,
+      token_id = EXCLUDED.token_id,
+      side = EXCLUDED.side,
+      limit_price = EXCLUDED.limit_price,
+      size_shares = EXCLUDED.size_shares,
+      notional_usd = EXCLUDED.notional_usd,
+      clob_order_id = EXCLUDED.clob_order_id,
+      status = EXCLUDED.status,
+      error_message = EXCLUDED.error_message,
+      raw_response = EXCLUDED.raw_response`,
     [
       row.entry_id,
       row.strategy_key ?? "default",

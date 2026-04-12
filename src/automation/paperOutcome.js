@@ -23,7 +23,7 @@ export function resetOutcomeTrailForTests() {
  */
 export async function runPaperOutcomeTick() {
   const s = CONFIG.strategy;
-  if (!s.enabled || !s.databaseUrl) return { line: null };
+  if (!s.enabled || !s.databaseUrl || !s.dryRun) return { line: null };
 
   const pool = getStrategyPool(s.databaseUrl);
   await ensureStrategySchemaOnce(pool);

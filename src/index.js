@@ -929,15 +929,18 @@ async function main() {
           if (st?.liveOrderLine) liveOrderStatusLine = st.liveOrderLine;
         }
 
-        const ot = await runPaperOutcomeTick();
-        if (ot?.line) outcomeStatusLine = ot.line;
+        if (CONFIG.strategy.dryRun) {
+          const ot = await runPaperOutcomeTick();
+          if (ot?.line) outcomeStatusLine = ot.line;
+        }
       }
 
+      const strategyLabel = CONFIG.strategy.dryRun ? "Paper strategy:" : "Strategy:";
       const lines = [
         titleLine,
         marketLine,
         kv("Time left:", `${timeColor}${fmtTimeLeft(timeLeftMin)}${ANSI.reset}`),
-        strategyStatusLine ? `${padLabel("Paper strategy:", LABEL_W)}${strategyStatusLine}` : null,
+        strategyStatusLine ? `${padLabel(strategyLabel, LABEL_W)}${strategyStatusLine}` : null,
         liveOrderStatusLine ? `${padLabel("Live CLOB:", LABEL_W)}${liveOrderStatusLine}` : null,
         outcomeStatusLine ? `${padLabel("Paper outcome:", LABEL_W)}${outcomeStatusLine}` : null,
         "",
