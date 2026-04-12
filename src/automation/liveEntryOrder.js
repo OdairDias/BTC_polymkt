@@ -5,6 +5,7 @@ import { getOrCreateClobClient, isRelayerBuilderConfigured } from "./liveClob.js
 
 const LIVE_DEBUG = process.env.STRATEGY_LIVE_DEBUG === "true";
 const ERR_MSG_MAX = 8000;
+const CONDITIONAL_TOKEN_DECIMALS = 6;
 
 function normalizeMarketOrderType(orderType, fallback = OrderType.FOK) {
   return orderType === OrderType.FAK || orderType === "FAK" ? OrderType.FAK : fallback;
@@ -98,6 +99,24 @@ function estimateBuyFillFromBook(levels, amountUsd) {
     acquiredShares,
     spentUsd: Math.max(0, Number(amountUsd) - Math.max(0, remainingUsd)),
     remainingUsd: Math.max(0, remainingUsd)
+  };
+}
+
+function normalizeConditionalBalanceShares(balanceRaw) {
+  const raw = toFiniteNumber(balanceRaw);
+  if (raw == null || raw <= 0) return null;
+  const shares = raw / (10 ** CONDITIONAL_TOKEN_DECIMALS);
+  return Number(roundDownDecimals(shares, CONDITIONAL_TOKEN_DECIMALS).toFixed(CONDITIONAL_TOKEN_DECIMALS));
+}
+
+async function readConditionalBalanceShares(clob, tokenId) {
+  const conditionalBalance = await clob.getBalanceAllowance({
+    asset_type: AssetType.CONDITIONAL,
+    token_id: String(tokenId)
+  });
+  return {
+    rawBalance: conditionalBalance?.balance ?? null,
+    shares: normalizeConditionalBalanceShares(conditionalBalance?.balance)
   };
 }
 
@@ -283,9 +302,20 @@ export async function tryPlaceLiveEntryOrder({
 
     const orderId = meta.orderId;
     const statusHint = meta.status ? ` | status ${meta.status}` : "";
+    let trackedShares = finalSize;
+
+    try {
+      const liveBalance = await readConditionalBalanceShares(clob, tokenId);
+      if (Number.isFinite(liveBalance.shares) && liveBalance.shares > 0) {
+        trackedShares = Number(roundDownDecimals(Math.min(finalSize, liveBalance.shares), 2).toFixed(2));
+      }
+    } catch {
+      // fallback to planned shares
+    }
 
     await insertLiveOrder(pgClient, {
       ...rowBase,
+      size_shares: trackedShares,
       clob_order_id: orderId != null ? String(orderId) : null,
       status: "SUBMITTED",
       error_message: null,
@@ -294,7 +324,9 @@ export async function tryPlaceLiveEntryOrder({
 
     return {
       ok: true,
-      line: `CLOB Limit Maker ok | price ${capPrice} | order ${orderId ?? "(sem id na resposta)"}${statusHint}`
+      line: `CLOB Limit Maker ok | price ${capPrice} | shares ${trackedShares.toFixed(2)} | order ${orderId ?? "(sem id na resposta)"}${statusHint}`,
+      sizeShares: trackedShares,
+      filledPrice: capPrice
     };
   } catch (err) {
     const explained = explainClobFailure(err);
@@ -443,9 +475,20 @@ export async function tryPlaceSniperFokOrder({
 
     const orderId = meta.orderId;
     const statusHint = meta.status ? ` | status ${meta.status}` : "";
+    let trackedShares = finalSize;
+
+    try {
+      const liveBalance = await readConditionalBalanceShares(clob, tokenId);
+      if (Number.isFinite(liveBalance.shares) && liveBalance.shares > 0) {
+        trackedShares = Number(roundDownDecimals(Math.min(finalSize, liveBalance.shares), 2).toFixed(2));
+      }
+    } catch {
+      // fallback to planned shares
+    }
 
     await insertLiveOrder(pgClient, {
       ...rowBase,
+      size_shares: trackedShares,
       clob_order_id: orderId != null ? String(orderId) : null,
       status: "SUBMITTED",
       error_message: null,
@@ -454,8 +497,8 @@ export async function tryPlaceSniperFokOrder({
 
     return {
       ok: true,
-      line: `CLOB ${effectiveOrderType} ok | price ${capPrice} | amt $${amountUsd} | order ${orderId ?? "(sem id)"}${statusHint}`,
-      sizeShares: finalSize,
+      line: `CLOB ${effectiveOrderType} ok | price ${capPrice} | amt $${amountUsd} | shares ${trackedShares.toFixed(2)} | order ${orderId ?? "(sem id)"}${statusHint}`,
+      sizeShares: trackedShares,
       filledPrice: capPrice
     };
   } catch (err) {
@@ -523,11 +566,8 @@ export async function tryPlaceTakeProfitExitOrder({
     let finalShares = Number(roundDownDecimals(wantedShares, 2).toFixed(2));
 
     try {
-      const conditionalBalance = await clob.getBalanceAllowance({
-        asset_type: AssetType.CONDITIONAL,
-        token_id: String(tokenId)
-      });
-      const availableShares = Number(conditionalBalance?.balance ?? NaN);
+      const conditionalBalance = await readConditionalBalanceShares(clob, tokenId);
+      const availableShares = conditionalBalance.shares;
       if (Number.isFinite(availableShares) && availableShares > 0) {
         finalShares = Number(roundDownDecimals(Math.min(wantedShares, availableShares), 2).toFixed(2));
       }
