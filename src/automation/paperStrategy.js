@@ -13,7 +13,12 @@ import { decideLateWindowSide } from "../strategy/lateWindow.js";
 import { computeRealizedExitPnl } from "../strategy/outcomeInfer.js";
 import { midFromBook } from "../strategy/pricing.js";
 import { resetLiveClobClient } from "./liveClob.js";
-import { shouldAttemptLiveOrder, tryPlaceSniperFokOrder, tryPlaceTakeProfitExitOrder } from "./liveEntryOrder.js";
+import {
+  readLiveSellableShares,
+  shouldAttemptLiveOrder,
+  tryPlaceSniperFokOrder,
+  tryPlaceTakeProfitExitOrder
+} from "./liveEntryOrder.js";
 import { resetOutcomeTrailForTests } from "./paperOutcome.js";
 import { evaluateAsymmetryGuard, evaluateRiskStatsGuard } from "./riskGuards.js";
 
@@ -488,18 +493,32 @@ export async function runPaperStrategyTick({
             clearTakeProfitState(liveTakeProfitState);
           } else {
             const bidPrice = toFiniteNumber(sideBestBid(poly, liveTakeProfitState.side));
-            const hasLiquidity = hasEnoughBookLiquidity({
-              side: liveTakeProfitState.side,
-              poly,
-              requiredShares: liveTakeProfitState.sizeShares,
-              liquiditySide: "bid"
-            });
             const targetPrice = toFiniteNumber(liveTakeProfitState.targetPrice);
             const grossProfitTargetUsd = toFiniteNumber(takeProfit.grossProfitTargetUsd);
             const forceExitMinutesLeft = toFiniteNumber(liveTakeProfitState.forceExitMinutesLeft);
+            let effectiveExitShares = toFiniteNumber(liveTakeProfitState.sizeShares);
+            if (liveTakeProfitState.tokenId != null) {
+              try {
+                const liveSellableShares = await readLiveSellableShares(liveTakeProfitState.tokenId);
+                if (liveSellableShares != null && liveSellableShares > 0) {
+                  effectiveExitShares =
+                    effectiveExitShares != null && effectiveExitShares > 0
+                      ? Math.min(effectiveExitShares, liveSellableShares)
+                      : liveSellableShares;
+                }
+              } catch {
+                // Fallback silencioso: se a leitura do saldo falhar, usamos o lote rastreado.
+              }
+            }
+            const hasLiquidity = hasEnoughBookLiquidity({
+              side: liveTakeProfitState.side,
+              poly,
+              requiredShares: effectiveExitShares,
+              liquiditySide: "bid"
+            });
             const grossExit = computeGrossExitSnapshot({
               bidPrice,
-              sizeShares: liveTakeProfitState.sizeShares,
+              sizeShares: effectiveExitShares,
               notionalUsd: liveTakeProfitState.notionalUsd
             });
             const timeStopDue =
@@ -523,7 +542,7 @@ export async function runPaperStrategyTick({
                   tokenId: liveTakeProfitState.tokenId,
                   targetPrice,
                   triggerPrice: targetPrice,
-                  sizeShares: liveTakeProfitState.sizeShares,
+                  sizeShares: effectiveExitShares,
                   notionalUsd: liveTakeProfitState.notionalUsd,
                   exitReason: "TAKE_PROFIT",
                   label: "TAKE PROFIT",
@@ -552,7 +571,7 @@ export async function runPaperStrategyTick({
                   tokenId: liveTakeProfitState.tokenId,
                   targetPrice: bidPrice,
                   triggerPrice: bidPrice,
-                  sizeShares: liveTakeProfitState.sizeShares,
+                  sizeShares: effectiveExitShares,
                   notionalUsd: liveTakeProfitState.notionalUsd,
                   exitReason: "GROSS_PROFIT",
                   label: "GROSS PROFIT",
@@ -582,7 +601,7 @@ export async function runPaperStrategyTick({
                     tokenId: liveTakeProfitState.tokenId,
                     targetPrice: bidPrice,
                     triggerPrice: bidPrice,
-                    sizeShares: liveTakeProfitState.sizeShares,
+                    sizeShares: effectiveExitShares,
                     notionalUsd: liveTakeProfitState.notionalUsd,
                     exitReason: "TIME_STOP",
                     label: "TIME STOP",

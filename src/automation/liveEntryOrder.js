@@ -120,6 +120,12 @@ async function readConditionalBalanceShares(clob, tokenId) {
   };
 }
 
+export async function readLiveSellableShares(tokenId) {
+  const clob = await getOrCreateClobClient();
+  const balance = await readConditionalBalanceShares(clob, tokenId);
+  return balance?.shares ?? null;
+}
+
 async function prepareImmediateBuyExecution({
   clob,
   tokenId,

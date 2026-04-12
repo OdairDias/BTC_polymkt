@@ -18,7 +18,7 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 - Compra maxima: `targetEntryPrice=0.10`
 - Piso de compra: `minEntryPrice=0.05`
 - Saida no lucro: `takeProfitPrice=0.25`
-- Trava de lucro bruto: `grossProfitTargetUsd=0.20`
+- Trava de lucro bruto: `grossProfitTargetUsd=0.22`
 - Saida por tempo: `forceExitMinutesLeft=2.5`
 - Tipo de ordem: `liveEntryOrderType=FAK`, `liveExitOrderType=FAK`
 
@@ -34,7 +34,7 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 6. No live, a entrada FAK faz um preflight no book e pode virar `skip` se nao houver asks/lote suficiente ate o preco aceito naquele instante.
 7. Depois da entrada, monitora o `best bid` da posicao aberta.
 8. Se o bid bater `0.25`, sai no lucro antes do vencimento.
-9. Mesmo sem bater `0.25`, se o lucro bruto realizavel ja for de pelo menos `+$0.20`, sai no bid atual para nao devolver ganho.
+9. Mesmo sem bater `0.25`, se o lucro bruto realizavel ja for de pelo menos `+$0.22`, sai no bid atual para nao devolver ganho.
 10. Se o alvo nao vier e o tempo estiver acabando, tenta sair quando faltarem `2.5` minutos.
 11. Se nem o alvo nem a saida por tempo conseguirem acontecer, a operacao ainda pode acabar sendo resolvida no fechamento oficial.
 
@@ -82,8 +82,8 @@ Os logs mostram qual caminho foi usado:
   - exige payout minimo de 2x, o que implica preco de entrada <= ~0.33
 - `takeProfitPrice=0.25`
   - alvo de saida antecipada no bid
-- `grossProfitTargetUsd=0.20`
-  - realiza lucro mais cedo quando o valor vendavel da posicao ja estiver acima do custo em pelo menos `$0.20`
+- `grossProfitTargetUsd=0.22`
+  - realiza lucro mais cedo quando o valor vendavel da posicao ja estiver acima do custo em pelo menos `$0.22`
 - `forceExitMinutesLeft=2.5`
   - saida por tempo quando faltam 2.5 min, evita carregar ate o fim
 
