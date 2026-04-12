@@ -2,7 +2,7 @@
 
 ## Em uma frase (para leigos)
 
-Esta estrategia compra cedo o lado mais barato do mercado de `15 minutos` e tenta sair com lucro em `0.40`, sem precisar esperar o resultado final.
+Esta estrategia compra cedo o lado mais barato do mercado de `15 minutos` e tenta sair com lucro em `0.30`, sem precisar esperar o resultado final.
 
 ## Objetivo
 
@@ -17,7 +17,7 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 - Fim da janela de entrada: `entryCloseMinutesLeft=5.0`
 - Compra maxima: `targetEntryPrice=0.20`
 - Piso de compra: `minEntryPrice=0.05`
-- Saida no lucro: `takeProfitPrice=0.40`
+- Saida no lucro: `takeProfitPrice=0.30`
 - Saida por tempo: `forceExitMinutesLeft=2.5`
 - Tipo de ordem: `liveEntryOrderType=FAK`, `liveExitOrderType=FAK`
 
@@ -32,7 +32,7 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
    - nao pode estar abaixo de `0.05`
 6. No live, a entrada FAK faz um preflight no book e pode virar `skip` se nao houver asks/lote suficiente ate o preco aceito naquele instante.
 7. Depois da entrada, monitora o `best bid` da posicao aberta.
-8. Se o bid bater `0.40`, sai no lucro antes do vencimento.
+8. Se o bid bater `0.30`, sai no lucro antes do vencimento.
 9. Se o alvo nao vier e o tempo estiver acabando, tenta sair quando faltarem `2.5` minutos.
 10. Se nem o alvo nem a saida por tempo conseguirem acontecer, a operacao ainda pode acabar sendo resolvida no fechamento oficial.
 
@@ -78,7 +78,7 @@ Os logs mostram qual caminho foi usado:
   - evita entrar em um lado que ja pode estar esmagado demais (`SKIP_CHEAP_TOO_CHEAP`)
 - `minPayoutMultiple=2.0`
   - exige payout minimo de 2x, o que implica preco de entrada <= ~0.33
-- `takeProfitPrice=0.40`
+- `takeProfitPrice=0.30`
   - alvo de saida antecipada no bid
 - `forceExitMinutesLeft=2.5`
   - saida por tempo quando faltam 2.5 min, evita carregar ate o fim
