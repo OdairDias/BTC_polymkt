@@ -20,9 +20,11 @@ import { computeSessionVwap, computeVwapSeries } from "./indicators/vwap.js";
 import { computeRsi, sma, slopeLast } from "./indicators/rsi.js";
 import { computeMacd } from "./indicators/macd.js";
 import { computeHeikenAshi, countConsecutive } from "./indicators/heikenAshi.js";
+import { computeAtr } from "./indicators/volatility.js";
 import { detectRegime } from "./engines/regime.js";
 import { scoreDirection, applyTimeAwareness } from "./engines/probability.js";
 import { computeEdge, decide } from "./engines/edge.js";
+import { computeFairValue, estimateOracleProbability } from "./strategy/fairValue.js";
 import { appendCsvRow, formatNumber, formatPct, getCandleWindowTiming, sleep } from "./utils.js";
 import { startBinanceTradeStream } from "./data/binanceWs.js";
 import fs from "node:fs";
@@ -371,6 +373,8 @@ function describeStrategyVariant(variant) {
     marketRef,
     `entry=${variant.entryMinutesLeft}m`,
     variant.grossProfitTargetUsd ? `gp=$${variant.grossProfitTargetUsd}` : null,
+    variant.minEdge ? `minEdge=${variant.minEdge}` : null,
+    variant.minModelProb ? `minProb=${variant.minModelProb}` : null,
     `liveEntry=${variant.liveEntryOrderType ?? "FOK"}`,
     `liveExit=${variant.liveExitOrderType ?? variant.liveEntryOrderType ?? "FOK"}`
   ].filter(Boolean).join(" ");
@@ -692,6 +696,9 @@ async function main() {
 
       const settlementMs = poly.ok && poly.market?.endDate ? new Date(poly.market.endDate).getTime() : null;
       const settlementLeftMin = settlementMs ? (settlementMs - Date.now()) / 60_000 : null;
+      const marketDecisionWindowMinutes = Number.isFinite(Number(displaySnapshot?.marketConfig?.marketWindowMinutes))
+        ? Number(displaySnapshot.marketConfig.marketWindowMinutes)
+        : CONFIG.candleWindowMinutes;
 
       const timeLeftMin = settlementLeftMin ?? timing.remainingMinutes;
 
@@ -750,7 +757,7 @@ async function main() {
         failedVwapReclaim
       });
 
-      const timeAware = applyTimeAwareness(scored.rawUp, timeLeftMin, CONFIG.candleWindowMinutes);
+      const timeAware = applyTimeAwareness(scored.rawUp, timeLeftMin, marketDecisionWindowMinutes);
 
       const marketUp = poly.ok ? poly.prices.up : null;
       const marketDown = poly.ok ? poly.prices.down : null;
@@ -839,6 +846,18 @@ async function main() {
       const ptbDelta = (currentPrice !== null && priceToBeat !== null && Number.isFinite(currentPrice) && Number.isFinite(priceToBeat))
         ? currentPrice - priceToBeat
         : null;
+      const volAtrUsd = computeAtr(klines5m, 14);
+      const oracleProbUp = estimateOracleProbability({
+        ptbDelta,
+        volAtr: volAtrUsd,
+        minutesLeft: timeLeftMin
+      });
+      const fairModelUp = computeFairValue({
+        probTa: timeAware.adjustedUp,
+        probOracle: oracleProbUp,
+        weightTa: 0.45
+      });
+      const fairModelDown = 1 - fairModelUp;
       const ptbDeltaColor = ptbDelta === null
         ? ANSI.gray
         : ptbDelta > 0
@@ -881,11 +900,11 @@ async function main() {
       const titleLine = poly.ok ? `${poly.market?.question ?? "-"}` : "-";
       const marketLine = kv("Market:", poly.ok ? (poly.market?.slug ?? "-") : "-");
 
-      const timeColor = timeLeftColorBand(timeLeftMin, CONFIG.candleWindowMinutes);
+      const timeColor = timeLeftColorBand(timeLeftMin, marketDecisionWindowMinutes);
       const timeLeftLine = `⏱ Time left: ${timeColor}${fmtTimeLeft(timeLeftMin)}${ANSI.reset}`;
 
       const polyTimeLeftColor = settlementLeftMin !== null
-        ? timeLeftColorBand(settlementLeftMin, CONFIG.candleWindowMinutes)
+        ? timeLeftColorBand(settlementLeftMin, marketDecisionWindowMinutes)
         : ANSI.reset;
 
       let strategyStatusLine = null;
@@ -916,11 +935,32 @@ async function main() {
             Number.isFinite(groupPriceToBeat)
               ? currentPrice - groupPriceToBeat
               : null;
+          const groupMarketUp = groupPoly.ok ? groupPoly.prices?.up ?? null : null;
+          const groupMarketDown = groupPoly.ok ? groupPoly.prices?.down ?? null : null;
+          const groupModelOracleUp = estimateOracleProbability({
+            ptbDelta: groupPtbDelta,
+            volAtr: volAtrUsd,
+            minutesLeft: groupSettlementLeftMin ?? timeLeftMin
+          });
+          const groupModelUp = computeFairValue({
+            probTa: fairModelUp,
+            probOracle: groupModelOracleUp,
+            weightTa: 0.5
+          });
+          const groupModelDown = 1 - groupModelUp;
 
           const st = await runPaperStrategyTick({
             poly: groupPoly,
             settlementLeftMin: groupSettlementLeftMin,
             ptbDelta: groupPtbDelta,
+            modelUp: groupModelUp,
+            modelDown: groupModelDown,
+            marketUp: groupMarketUp,
+            marketDown: groupMarketDown,
+            oraclePrice: currentPrice,
+            binanceSpotPrice: spotPrice,
+            priceToBeat: groupPriceToBeat,
+            volAtrUsd,
             rsiNow,
             macd,
             haNarrative,

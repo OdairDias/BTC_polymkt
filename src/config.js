@@ -48,7 +48,9 @@ const DEFAULTS = {
     takeProfitEnabled: false,
     takeProfitPrice: 0.80,
     grossProfitTargetUsd: 0,
-    forceExitMinutesLeft: 0
+    forceExitMinutesLeft: 0,
+    minEdge: 0,
+    minModelProb: 0
   },
 
   /** Execução CLOB (conta real). Chaves só via env — nunca no código. */
@@ -115,6 +117,8 @@ function mergeStrategyVariant(base, candidate) {
   const forceExitMinutesLeft = Number(c.forceExitMinutesLeft ?? base.forceExitMinutesLeft);
   const minEntryPrice = Number(c.minEntryPrice ?? base.minEntryPrice);
   const marketWindowMinutes = Number(c.marketWindowMinutes ?? base.marketWindowMinutes);
+  const minEdge = Number(c.minEdge ?? base.minEdge);
+  const minModelProb = Number(c.minModelProb ?? base.minModelProb);
   return {
     key: sanitizeStrategyVariantKey(c.key, "default"),
     label: String(c.label ?? c.key ?? "default"),
@@ -136,6 +140,8 @@ function mergeStrategyVariant(base, candidate) {
     takeProfitPrice: Number.isFinite(takeProfitPrice) ? Math.max(0.01, Math.min(0.99, takeProfitPrice)) : base.takeProfitPrice,
     grossProfitTargetUsd: Number.isFinite(grossProfitTargetUsd) && grossProfitTargetUsd > 0 ? Math.max(0.01, grossProfitTargetUsd) : null,
     forceExitMinutesLeft: Number.isFinite(forceExitMinutesLeft) && forceExitMinutesLeft > 0 ? forceExitMinutesLeft : null,
+    minEdge: Number.isFinite(minEdge) && minEdge > 0 ? Math.min(0.99, minEdge) : null,
+    minModelProb: Number.isFinite(minModelProb) && minModelProb > 0 ? Math.min(0.99, minModelProb) : null,
     entryCloseMinutesLeft: Number.isFinite(Number(c.entryCloseMinutesLeft)) ? Number(c.entryCloseMinutesLeft) : base.entryCloseMinutesLeft,
     liveEntryOrderType: sanitizeMarketOrderType(c.liveEntryOrderType ?? base.liveEntryOrderType),
     liveExitOrderType: sanitizeMarketOrderType(c.liveExitOrderType ?? base.liveExitOrderType),
@@ -246,6 +252,14 @@ export const CONFIG = {
     forceExitMinutesLeft: Math.max(
       0,
       Number(process.env.STRATEGY_FORCE_EXIT_MINUTES_LEFT) || DEFAULTS.strategy.forceExitMinutesLeft
+    ),
+    minEdge: Math.max(
+      0,
+      Number(process.env.STRATEGY_MIN_EDGE) || DEFAULTS.strategy.minEdge
+    ),
+    minModelProb: Math.max(
+      0,
+      Number(process.env.STRATEGY_MIN_MODEL_PROB) || DEFAULTS.strategy.minModelProb
     )
   },
 
@@ -290,6 +304,8 @@ const baseVariant = {
   takeProfitPrice: CONFIG.strategy.takeProfitPrice,
   grossProfitTargetUsd: CONFIG.strategy.grossProfitTargetUsd,
   forceExitMinutesLeft: CONFIG.strategy.forceExitMinutesLeft,
+  minEdge: CONFIG.strategy.minEdge,
+  minModelProb: CONFIG.strategy.minModelProb,
   entryCloseMinutesLeft: null,
   liveEntryOrderType: "FOK",
   liveExitOrderType: "FOK",

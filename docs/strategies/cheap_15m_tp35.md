@@ -19,6 +19,8 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 - Piso de compra: `minEntryPrice=0.05`
 - Saida no lucro: `takeProfitPrice=0.45`
 - Trava de lucro bruto: `grossProfitTargetUsd=0.22`
+- Filtro de edge: `minEdge=0.04`
+- Filtro de probabilidade: `minModelProb=0.56`
 - Saida por tempo: `forceExitMinutesLeft=2.5`
 - Tipo de ordem: `liveEntryOrderType=FAK`, `liveExitOrderType=FAK`
 
@@ -29,8 +31,10 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 3. Em cada tick dentro dessa janela, compara os dois lados (`UP` e `DOWN`).
 4. Escolhe o lado mais barato.
 5. So entra se esse lado estiver barato, mas ainda "vivo":
-   - nao pode estar acima de `0.10`
+   - nao pode estar acima de `0.35`
    - nao pode estar abaixo de `0.05`
+   - edge modelado do lado escolhido precisa ser >= `0.04`
+   - probabilidade modelada do lado escolhido precisa ser >= `0.56`
 6. No live, a entrada FAK faz um preflight no book e pode virar `skip` se nao houver asks/lote suficiente ate o preco aceito naquele instante.
 7. Depois da entrada, monitora o `best bid` da posicao aberta.
 8. Se o bid bater `0.45`, sai no lucro antes do vencimento.
@@ -79,11 +83,15 @@ Os logs mostram qual caminho foi usado:
 - `minEntryPrice=0.05`
   - evita entrar em um lado que ja pode estar esmagado demais (`SKIP_CHEAP_TOO_CHEAP`)
 - `minPayoutMultiple=2.0`
-  - exige payout minimo de 2x, o que implica preco de entrada <= ~0.33
+  - exige payout minimo de 2x, o que implica preco de entrada <= ~0.50
 - `takeProfitPrice=0.45`
   - alvo de saida antecipada no bid
 - `grossProfitTargetUsd=0.22`
   - realiza lucro mais cedo quando o valor vendavel da posicao ja estiver acima do custo em pelo menos `$0.22`
+- `minEdge=0.04`
+  - exige distorcao minima entre probabilidade modelada e probabilidade implicita de mercado
+- `minModelProb=0.56`
+  - evita entrada quando o proprio modelo nao esta convicto o suficiente
 - `forceExitMinutesLeft=2.5`
   - saida por tempo quando faltam 2.5 min, evita carregar ate o fim
 

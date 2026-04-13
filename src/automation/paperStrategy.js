@@ -62,7 +62,9 @@ function getVariants(variantSubset = null) {
       takeProfitEnabled: CONFIG.strategy.takeProfitEnabled,
       takeProfitPrice: CONFIG.strategy.takeProfitPrice,
       grossProfitTargetUsd: CONFIG.strategy.grossProfitTargetUsd,
-      forceExitMinutesLeft: CONFIG.strategy.forceExitMinutesLeft
+      forceExitMinutesLeft: CONFIG.strategy.forceExitMinutesLeft,
+      minEdge: CONFIG.strategy.minEdge,
+      minModelProb: CONFIG.strategy.minModelProb
     }
   ];
 }
@@ -215,6 +217,14 @@ export async function runPaperStrategyTick({
   poly,
   settlementLeftMin,
   ptbDelta,
+  modelUp,
+  modelDown,
+  marketUp,
+  marketDown,
+  oraclePrice,
+  binanceSpotPrice,
+  priceToBeat,
+  volAtrUsd,
   rsiNow,
   macd,
   haNarrative,
@@ -763,8 +773,14 @@ export async function runPaperStrategyTick({
         downMid,
         upBuy,
         downBuy,
+        modelUp,
+        modelDown,
+        marketUp,
+        marketDown,
         targetEntryPrice: variant.targetEntryPrice,
         minEntryPrice: variant.minEntryPrice,
+        minEdge: variant.minEdge,
+        minModelProb: variant.minModelProb,
         epsilon: variant.priceEpsilon,
         ptbDelta,
         rsiNow,
@@ -908,7 +924,18 @@ export async function runPaperStrategyTick({
         notional_usd: variant.notionalUsd,
         entry_price: paperEntryPrice,
         simulated_shares: paperSimulatedShares,
-        dry_run: s.dryRun
+        dry_run: s.dryRun,
+        oracle_price: oraclePrice ?? null,
+        binance_spot_price: binanceSpotPrice ?? null,
+        price_to_beat: priceToBeat ?? null,
+        ptb_delta_usd: ptbDelta ?? null,
+        model_prob_up: modelUp ?? null,
+        market_prob_up: marketUp ?? null,
+        edge_up:
+          Number.isFinite(Number(modelUp)) && Number.isFinite(Number(marketUp))
+            ? Number(modelUp) - Number(marketUp)
+            : null,
+        vol_atr_usd: volAtrUsd ?? null
       });
       const signalId = signalRecord.id;
       let liveEntry = null;

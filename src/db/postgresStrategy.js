@@ -137,6 +137,17 @@ export async function ensureStrategySchema(client) {
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_outcome_prices_json JSONB;
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_to_beat NUMERIC;
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_at_close NUMERIC;
+    
+    -- Marco 0: Instrumentação Profissional
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS oracle_price NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS binance_spot_price NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS price_to_beat NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS ptb_delta_usd NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS model_prob_up NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS market_prob_up NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS edge_up NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS vol_atr_usd NUMERIC;
+
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
     ALTER TABLE strategy_live_orders ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
@@ -221,9 +232,11 @@ export async function insertPaperSignal(client, row) {
       strategy_key, market_slug, condition_id, market_end_at, minutes_left,
       up_mid, down_mid, up_buy, down_buy,
       up_best_bid, up_best_ask, down_best_bid, down_best_ask,
-      result_code, chosen_side, notional_usd, entry_price, simulated_shares, dry_run
+      result_code, chosen_side, notional_usd, entry_price, simulated_shares, dry_run,
+      oracle_price, binance_spot_price, price_to_beat, ptb_delta_usd,
+      model_prob_up, market_prob_up, edge_up, vol_atr_usd
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27
     )
     ON CONFLICT (strategy_key, market_slug) DO NOTHING
     RETURNING id`,
@@ -246,7 +259,15 @@ export async function insertPaperSignal(client, row) {
       row.notional_usd,
       row.entry_price ?? null,
       row.simulated_shares ?? null,
-      row.dry_run
+      row.dry_run,
+      row.oracle_price ?? null,
+      row.binance_spot_price ?? null,
+      row.price_to_beat ?? null,
+      row.ptb_delta_usd ?? null,
+      row.model_prob_up ?? null,
+      row.market_prob_up ?? null,
+      row.edge_up ?? null,
+      row.vol_atr_usd ?? null
     ]
   );
   if (res.rowCount > 0 && res.rows[0]?.id != null) {
@@ -261,9 +282,11 @@ export async function ensurePaperSignal(client, row) {
       strategy_key, market_slug, condition_id, market_end_at, minutes_left,
       up_mid, down_mid, up_buy, down_buy,
       up_best_bid, up_best_ask, down_best_bid, down_best_ask,
-      result_code, chosen_side, notional_usd, entry_price, simulated_shares, dry_run
+      result_code, chosen_side, notional_usd, entry_price, simulated_shares, dry_run,
+      oracle_price, binance_spot_price, price_to_beat, ptb_delta_usd,
+      model_prob_up, market_prob_up, edge_up, vol_atr_usd
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27
     )
     ON CONFLICT (strategy_key, market_slug) DO UPDATE SET
       condition_id = COALESCE(EXCLUDED.condition_id, strategy_paper_signals.condition_id),
@@ -282,7 +305,15 @@ export async function ensurePaperSignal(client, row) {
       notional_usd = COALESCE(EXCLUDED.notional_usd, strategy_paper_signals.notional_usd),
       entry_price = EXCLUDED.entry_price,
       simulated_shares = EXCLUDED.simulated_shares,
-      dry_run = EXCLUDED.dry_run
+      dry_run = EXCLUDED.dry_run,
+      oracle_price = COALESCE(EXCLUDED.oracle_price, strategy_paper_signals.oracle_price),
+      binance_spot_price = COALESCE(EXCLUDED.binance_spot_price, strategy_paper_signals.binance_spot_price),
+      price_to_beat = COALESCE(EXCLUDED.price_to_beat, strategy_paper_signals.price_to_beat),
+      ptb_delta_usd = COALESCE(EXCLUDED.ptb_delta_usd, strategy_paper_signals.ptb_delta_usd),
+      model_prob_up = COALESCE(EXCLUDED.model_prob_up, strategy_paper_signals.model_prob_up),
+      market_prob_up = COALESCE(EXCLUDED.market_prob_up, strategy_paper_signals.market_prob_up),
+      edge_up = COALESCE(EXCLUDED.edge_up, strategy_paper_signals.edge_up),
+      vol_atr_usd = COALESCE(EXCLUDED.vol_atr_usd, strategy_paper_signals.vol_atr_usd)
     RETURNING id`,
     [
       row.strategy_key ?? "default",
@@ -303,7 +334,15 @@ export async function ensurePaperSignal(client, row) {
       row.notional_usd,
       row.entry_price ?? null,
       row.simulated_shares ?? null,
-      row.dry_run
+      row.dry_run,
+      row.oracle_price ?? null,
+      row.binance_spot_price ?? null,
+      row.price_to_beat ?? null,
+      row.ptb_delta_usd ?? null,
+      row.model_prob_up ?? null,
+      row.market_prob_up ?? null,
+      row.edge_up ?? null,
+      row.vol_atr_usd ?? null
     ]
   );
   return { id: res.rows[0]?.id ?? null };

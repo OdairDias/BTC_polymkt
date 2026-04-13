@@ -71,7 +71,7 @@ export const STRATEGY_VARIANTS = [
   },
   {
     key: "cheap_15m_tp35",
-    label: "Cheap Revert 15m (TP 0.45 / GP 0.22)",
+    label: "Cheap Revert 15m (TP 0.45 / GP 0.22 / edge 0.04)",
     enabled: true,
     decisionMode: "cheap_revert",
     entryMinutesLeft: 13.75,
@@ -89,6 +89,8 @@ export const STRATEGY_VARIANTS = [
     takeProfitEnabled: true,
     takeProfitPrice: 0.45,
     grossProfitTargetUsd: 0.22,
+    minEdge: 0.04,
+    minModelProb: 0.56,
     forceExitMinutesLeft: 2.5,
     liveEntryOrderType: "FAK",
     liveExitOrderType: "FAK",

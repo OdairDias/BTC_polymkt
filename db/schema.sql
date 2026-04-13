@@ -21,6 +21,14 @@ CREATE TABLE IF NOT EXISTS strategy_paper_signals (
   entry_price NUMERIC,
   simulated_shares NUMERIC,
   dry_run BOOLEAN NOT NULL DEFAULT true,
+  oracle_price NUMERIC,
+  binance_spot_price NUMERIC,
+  price_to_beat NUMERIC,
+  ptb_delta_usd NUMERIC,
+  model_prob_up NUMERIC,
+  market_prob_up NUMERIC,
+  edge_up NUMERIC,
+  vol_atr_usd NUMERIC,
   UNIQUE(strategy_key, market_slug)
 );
 
@@ -72,6 +80,14 @@ ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_to_b
 ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_at_close NUMERIC;
 ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
 ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS oracle_price NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS binance_spot_price NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS price_to_beat NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS ptb_delta_usd NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS model_prob_up NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS market_prob_up NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS edge_up NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS vol_atr_usd NUMERIC;
 ALTER TABLE strategy_paper_signals DROP CONSTRAINT IF EXISTS strategy_paper_signals_market_slug_key;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_strategy_paper_signals_strategy_slug
   ON strategy_paper_signals(strategy_key, market_slug);

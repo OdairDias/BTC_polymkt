@@ -12,8 +12,14 @@ export function decideLateWindowSide({
   downMid,
   upBuy,
   downBuy,
+  modelUp,
+  modelDown,
+  marketUp,
+  marketDown,
   targetEntryPrice,
   minEntryPrice,
+  minEdge,
+  minModelProb,
   epsilon,
   ptbDelta,
   rsiNow,
@@ -74,7 +80,48 @@ export function decideLateWindowSide({
       return { inWindow: true, result: "SKIP_CHEAP_TOO_CHEAP", side: null, upMid, downMid };
     }
 
-    return { inWindow: true, result: chosenSide, side: chosenSide, upMid, downMid };
+    const requiredEdge = Number(minEdge);
+    const requiredModelProb = Number(minModelProb);
+    const edgeGateEnabled = Number.isFinite(requiredEdge) && requiredEdge > 0;
+    const modelProbGateEnabled = Number.isFinite(requiredModelProb) && requiredModelProb > 0;
+
+    const selectedModelProbRaw = chosenSide === "UP" ? modelUp : modelDown;
+    const selectedMarketProbRaw = chosenSide === "UP" ? marketUp : marketDown;
+    const selectedModelProb = Number.isFinite(Number(selectedModelProbRaw)) ? Number(selectedModelProbRaw) : null;
+    const selectedMarketProb = Number.isFinite(Number(selectedMarketProbRaw)) ? Number(selectedMarketProbRaw) : null;
+    const selectedEdge =
+      selectedModelProb !== null && selectedMarketProb !== null
+        ? selectedModelProb - selectedMarketProb
+        : null;
+
+    if (modelProbGateEnabled) {
+      if (selectedModelProb === null) {
+        return { inWindow: true, result: "SKIP_MODEL_PROB_UNAVAILABLE", side: null, upMid, downMid };
+      }
+      if (selectedModelProb < requiredModelProb) {
+        return { inWindow: true, result: "SKIP_MODEL_PROB_TOO_LOW", side: null, upMid, downMid };
+      }
+    }
+
+    if (edgeGateEnabled) {
+      if (selectedEdge === null) {
+        return { inWindow: true, result: "SKIP_EDGE_UNAVAILABLE", side: null, upMid, downMid };
+      }
+      if (selectedEdge < requiredEdge) {
+        return { inWindow: true, result: "SKIP_EDGE_TOO_SMALL", side: null, upMid, downMid };
+      }
+    }
+
+    return {
+      inWindow: true,
+      result: chosenSide,
+      side: chosenSide,
+      upMid,
+      downMid,
+      selectedModelProb,
+      selectedMarketProb,
+      selectedEdge
+    };
   }
 
   // sniper_v2
