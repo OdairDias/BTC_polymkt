@@ -26,6 +26,8 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 - Paper fill conservador: `paperFillMode=pessimistic`
 - Slippage paper: `paperEntrySlippageBps=25`, `paperExitSlippageBps=35`
 - Guard de staleness: `maxOracleLagMs=20000`, `maxBinanceLagMs=6000`, `maxSnapshotAgeMs=4000`
+- Sizing dinamico: `sizingMode=kelly`, `kellyFraction=0.35`, faixa `0.70` a `1.00` USD
+- Kill-switch diario: `maxDailyLossUsd=2.0` no timezone `America/Sao_Paulo`
 - Saida por tempo: `forceExitMinutesLeft=2.5`
 - Tipo de ordem: `liveEntryOrderType=FAK`, `liveExitOrderType=FAK`
 
@@ -109,6 +111,10 @@ Os logs mostram qual caminho foi usado:
   - simula entrada/saida de forma conservadora (mais perto do que ocorre em execucao real)
 - `maxOracleLagMs=20000`, `maxBinanceLagMs=6000`, `maxSnapshotAgeMs=4000`
   - evita abrir novas posicoes quando os dados chegam velhos (stale)
+- `sizingMode=kelly`, `kellyFraction=0.35`, `kellyMinNotionalUsd=0.70`, `kellyMaxNotionalUsd=1.00`
+  - ajusta o notional por confianca/edge sem passar de `$1.00` por entrada
+- `maxDailyLossUsd=2.0`, `riskDayTimezone=America/Sao_Paulo`
+  - pausa novas entradas no dia quando a perda acumulada bate o limite
 
 ## Leituras praticas
 

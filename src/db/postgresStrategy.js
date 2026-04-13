@@ -232,6 +232,39 @@ export async function fetchOutcomeRiskStats(client, { strategyKey = "default", r
   };
 }
 
+export async function fetchDailyRiskStats(
+  client,
+  { strategyKey = "default", riskDayTimezone = "America/Sao_Paulo" } = {}
+) {
+  const key = String(strategyKey || "default");
+  const tz = String(riskDayTimezone || "America/Sao_Paulo").trim() || "America/Sao_Paulo";
+  const res = await client.query(
+    `WITH day_bounds AS (
+       SELECT
+         (date_trunc('day', NOW() AT TIME ZONE $2) AT TIME ZONE $2) AS day_start_utc
+     )
+     SELECT
+       COALESCE(SUM(o.pnl_simulated_usd), 0)::float8 AS daily_pnl,
+       COUNT(*)::int AS daily_trades,
+       MIN(o.created_at) AS first_trade_at,
+       MAX(o.created_at) AS last_trade_at
+     FROM strategy_paper_outcomes o
+     CROSS JOIN day_bounds d
+     WHERE o.entry_correct IS NOT NULL
+       AND o.strategy_key = $1
+       AND o.created_at >= d.day_start_utc
+       AND o.created_at < d.day_start_utc + interval '1 day'`,
+    [key, tz]
+  );
+  return {
+    dailyPnlUsd: Number(res.rows?.[0]?.daily_pnl ?? 0),
+    dailyTrades: Number(res.rows?.[0]?.daily_trades ?? 0),
+    firstTradeAt: res.rows?.[0]?.first_trade_at ?? null,
+    lastTradeAt: res.rows?.[0]?.last_trade_at ?? null,
+    riskDayTimezone: tz
+  };
+}
+
 /**
  * Uma linha por mercado (UNIQUE market_slug). Retorna { inserted: boolean, id? }
  */

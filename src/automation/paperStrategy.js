@@ -14,6 +14,7 @@ import { decideLateWindowSide } from "../strategy/lateWindow.js";
 import { computeRealizedExitPnl } from "../strategy/outcomeInfer.js";
 import { applyPaperExecutionPrice, normalizePaperFillMode } from "../strategy/executionModel.js";
 import { midFromBook } from "../strategy/pricing.js";
+import { chooseStrategyNotional } from "../strategy/sizing.js";
 import { resetLiveClobClient } from "./liveClob.js";
 import {
   readLiveSellableShares,
@@ -100,6 +101,12 @@ function buildVariantConfigHash(variant) {
       maxSnapshotAgeMs: variant?.maxSnapshotAgeMs ?? null,
       sniperDeltaFloorUsd: variant?.sniperDeltaFloorUsd ?? null,
       sniperDeltaAtrMult: variant?.sniperDeltaAtrMult ?? null,
+      sizingMode: variant?.sizingMode ?? null,
+      kellyFraction: variant?.kellyFraction ?? null,
+      kellyMinNotionalUsd: variant?.kellyMinNotionalUsd ?? null,
+      kellyMaxNotionalUsd: variant?.kellyMaxNotionalUsd ?? null,
+      maxDailyLossUsd: variant?.maxDailyLossUsd ?? null,
+      riskDayTimezone: variant?.riskDayTimezone ?? null,
       liveEntryOrderType: variant?.liveEntryOrderType ?? null,
       liveExitOrderType: variant?.liveExitOrderType ?? null,
       marketSlugPrefix: variant?.marketSlugPrefix ?? null,
@@ -115,6 +122,7 @@ function buildEntryAttributionContext({
   effectiveDecision,
   paperResultCode,
   settlementLeftMin,
+  activeNotionalUsd,
   entryPrice,
   simulatedShares,
   upMid,
@@ -137,7 +145,8 @@ function buildEntryAttributionContext({
   rsiNow,
   macd,
   haNarrative,
-  dataHealth
+  dataHealth,
+  sizingDetails
 }) {
   return {
     decision_mode: variant?.decisionMode ?? "sniper_v2",
@@ -145,6 +154,7 @@ function buildEntryAttributionContext({
     entry_record_result_code: paperResultCode ?? null,
     side: effectiveDecision?.side ?? null,
     minutes_left: toFiniteNumber(settlementLeftMin),
+    notional_usd: toFiniteNumber(activeNotionalUsd),
     entry_price: toFiniteNumber(entryPrice),
     simulated_shares: toFiniteNumber(simulatedShares),
     selected_model_prob: toFiniteNumber(effectiveDecision?.selectedModelProb),
@@ -176,6 +186,13 @@ function buildEntryAttributionContext({
       oracle_lag_ms: toFiniteNumber(dataHealth?.oracleLagMs),
       binance_lag_ms: toFiniteNumber(dataHealth?.binanceLagMs),
       snapshot_age_ms: toFiniteNumber(dataHealth?.snapshotAgeMs)
+    },
+    sizing: {
+      mode: sizingDetails?.sizingMode ?? null,
+      kelly_full: toFiniteNumber(sizingDetails?.kellyFull),
+      kelly_applied: toFiniteNumber(sizingDetails?.kellyApplied),
+      estimated_prob: toFiniteNumber(sizingDetails?.estimatedProb),
+      market_prob: toFiniteNumber(sizingDetails?.marketProb)
     }
   };
 }
@@ -217,7 +234,13 @@ function getVariants(variantSubset = null) {
       maxBinanceLagMs: CONFIG.strategy.maxBinanceLagMs,
       maxSnapshotAgeMs: CONFIG.strategy.maxSnapshotAgeMs,
       sniperDeltaFloorUsd: CONFIG.strategy.sniperDeltaFloorUsd,
-      sniperDeltaAtrMult: CONFIG.strategy.sniperDeltaAtrMult
+      sniperDeltaAtrMult: CONFIG.strategy.sniperDeltaAtrMult,
+      sizingMode: CONFIG.strategy.sizingMode,
+      kellyFraction: CONFIG.strategy.kellyFraction,
+      kellyMinNotionalUsd: CONFIG.strategy.kellyMinNotionalUsd,
+      kellyMaxNotionalUsd: CONFIG.strategy.kellyMaxNotionalUsd,
+      maxDailyLossUsd: CONFIG.strategy.maxDailyLossUsd,
+      riskDayTimezone: CONFIG.strategy.riskDayTimezone
     }
   ];
 }
@@ -1083,6 +1106,8 @@ export async function runPaperStrategyTick({
       const anchoredSniper = isAnchoredSniperVariant(variant);
       let entryPrice = null;
       let simulatedShares = null;
+      let activeNotionalUsd = Math.max(0.01, Number(variant.notionalUsd) || 1);
+      let sizingDetails = null;
 
       if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
         if (variant.contrarian) {
@@ -1145,7 +1170,9 @@ export async function runPaperStrategyTick({
           strategyKey: key,
           maxConsecutiveLosses: variant.maxConsecutiveLosses,
           rollingLossHours: variant.rollingLossHours,
-          maxRollingLossUsd: variant.maxRollingLossUsd
+          maxRollingLossUsd: variant.maxRollingLossUsd,
+          maxDailyLossUsd: variant.maxDailyLossUsd,
+          riskDayTimezone: variant.riskDayTimezone
         });
         if (!risk.allowed) {
           effectiveDecision = { ...effectiveDecision, side: null, result: risk.resultCode };
@@ -1153,8 +1180,30 @@ export async function runPaperStrategyTick({
         }
       }
 
+      if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
+        sizingDetails = chooseStrategyNotional({
+          variantNotionalUsd: variant.notionalUsd,
+          sizingMode: variant.sizingMode,
+          side: effectiveDecision.side,
+          selectedModelProb: effectiveDecision?.selectedModelProb ?? null,
+          selectedMarketProb: effectiveDecision?.selectedMarketProb ?? null,
+          modelUp,
+          modelDown,
+          marketUp,
+          marketDown,
+          entryPrice,
+          kellyFraction: variant.kellyFraction,
+          kellyMinNotionalUsd: variant.kellyMinNotionalUsd,
+          kellyMaxNotionalUsd: variant.kellyMaxNotionalUsd
+        });
+        const nextNotional = Number(sizingDetails?.notionalUsd);
+        if (Number.isFinite(nextNotional) && nextNotional > 0) {
+          activeNotionalUsd = nextNotional;
+        }
+      }
+
       if ((effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") && !anchoredSniper) {
-        simulatedShares = variant.notionalUsd / entryPrice;
+        simulatedShares = activeNotionalUsd / entryPrice;
         if (!hasEnoughBookLiquidity({
           side: effectiveDecision.side,
           poly,
@@ -1197,6 +1246,7 @@ export async function runPaperStrategyTick({
         effectiveDecision,
         paperResultCode,
         settlementLeftMin,
+        activeNotionalUsd,
         entryPrice: paperEntryPrice,
         simulatedShares: paperSimulatedShares,
         upMid,
@@ -1219,7 +1269,8 @@ export async function runPaperStrategyTick({
         rsiNow,
         macd,
         haNarrative,
-        dataHealth
+        dataHealth,
+        sizingDetails
       });
 
       const signalRecord = await ensurePaperSignal(client, {
@@ -1242,7 +1293,7 @@ export async function runPaperStrategyTick({
         down_best_ask: downBook.bestAsk ?? null,
         result_code: paperResultCode,
         chosen_side: paperChosenSide,
-        notional_usd: variant.notionalUsd,
+        notional_usd: activeNotionalUsd,
         entry_price: paperEntryPrice,
         simulated_shares: paperSimulatedShares,
         dry_run: s.dryRun,
@@ -1287,7 +1338,7 @@ export async function runPaperStrategyTick({
           sniperState.side = effectiveDecision.side;
           sniperState.tokenId = String(tokenId);
           sniperState.limitPrice = entryPrice;
-          sniperState.notionalUsd = variant.notionalUsd;
+          sniperState.notionalUsd = activeNotionalUsd;
           sniperState.entryId = signalId;
           localLiveLine = `${ANSI_YELLOW}SNIPER ARMED: ${effectiveDecision.side} <= ${entryPrice.toFixed(2)}${ANSI_RESET}`;
         } else {
@@ -1306,7 +1357,7 @@ export async function runPaperStrategyTick({
               marketSlug,
               tokenId,
               limitPrice: entryPrice,
-              notionalUsd: variant.notionalUsd,
+              notionalUsd: activeNotionalUsd,
               orderType: liveEntryOrderType,
               maxAcceptablePrice: variant.maxEntryPrice
             });
@@ -1331,7 +1382,7 @@ export async function runPaperStrategyTick({
             tokenId,
             targetPrice: takeProfit.price,
             sizeShares: simulatedShares,
-            notionalUsd: variant.notionalUsd,
+            notionalUsd: activeNotionalUsd,
             entryId: signalId,
             entryPrice,
             forceExitMinutesLeft: takeProfit.forceExitMinutesLeft
@@ -1348,7 +1399,7 @@ export async function runPaperStrategyTick({
               tokenId,
               targetPrice: takeProfit.price,
               sizeShares: Number(liveEntry.sizeShares ?? simulatedShares),
-              notionalUsd: variant.notionalUsd,
+              notionalUsd: activeNotionalUsd,
               entryId: signalId,
               entryPrice: Number(liveEntry.filledPrice ?? entryPrice),
               forceExitMinutesLeft: takeProfit.forceExitMinutesLeft
@@ -1360,16 +1411,16 @@ export async function runPaperStrategyTick({
       }
 
       if (anchoredSniper && (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN")) {
-        localPaperLine = `${ANSI_YELLOW}${tag} ARMED ${effectiveDecision.side} <= ${entryPrice?.toFixed(3) ?? "?"} ($${variant.notionalUsd})${ANSI_RESET}`;
+        localPaperLine = `${ANSI_YELLOW}${tag} ARMED ${effectiveDecision.side} <= ${entryPrice?.toFixed(3) ?? "?"} ($${activeNotionalUsd.toFixed(2)})${ANSI_RESET}`;
       } else if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
         if (paperEnabled) {
-          localPaperLine = `${ANSI_GREEN}${tag} ${effectiveDecision.side} @${entryPrice?.toFixed(3) ?? "?"} ($${variant.notionalUsd})${ANSI_RESET}`;
+          localPaperLine = `${ANSI_GREEN}${tag} ${effectiveDecision.side} @${entryPrice?.toFixed(3) ?? "?"} ($${activeNotionalUsd.toFixed(2)})${ANSI_RESET}`;
         } else if (liveEntry?.ok) {
-          localPaperLine = `${ANSI_GREEN}LIVE ENTRY ${effectiveDecision.side} @${Number(liveEntry.filledPrice ?? entryPrice)?.toFixed?.(3) ?? "?"} ($${variant.notionalUsd})${ANSI_RESET}`;
+          localPaperLine = `${ANSI_GREEN}LIVE ENTRY ${effectiveDecision.side} @${Number(liveEntry.filledPrice ?? entryPrice)?.toFixed?.(3) ?? "?"} ($${activeNotionalUsd.toFixed(2)})${ANSI_RESET}`;
         } else if (canLiveTrade) {
-          localPaperLine = `${ANSI_YELLOW}LIVE SIGNAL ${effectiveDecision.side} @${entryPrice?.toFixed(3) ?? "?"} ($${variant.notionalUsd})${ANSI_RESET}`;
+          localPaperLine = `${ANSI_YELLOW}LIVE SIGNAL ${effectiveDecision.side} @${entryPrice?.toFixed(3) ?? "?"} ($${activeNotionalUsd.toFixed(2)})${ANSI_RESET}`;
         } else {
-          localPaperLine = `${ANSI_GRAY}SIGNAL ${effectiveDecision.side} @${entryPrice?.toFixed(3) ?? "?"} ($${variant.notionalUsd})${ANSI_RESET}`;
+          localPaperLine = `${ANSI_GRAY}SIGNAL ${effectiveDecision.side} @${entryPrice?.toFixed(3) ?? "?"} ($${activeNotionalUsd.toFixed(2)})${ANSI_RESET}`;
         }
       } else {
         localPaperLine = `${ANSI_GRAY}${tag} ${effectiveDecision.result} (UP ${upMid?.toFixed?.(3) ?? "-"} vs DOWN ${downMid?.toFixed?.(3) ?? "-"})${ANSI_RESET}`;

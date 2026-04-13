@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node src/index.js",
     "test:creds": "node scripts/test-polymarket-creds.mjs",
-    "report:strategy": "node scripts/report-strategy.mjs"
+    "report:strategy": "node scripts/report-strategy.mjs",
+    "walkforward:strategy": "node scripts/walkforward-strategy.mjs"
   },
   "dependencies": {
     "@polymarket/builder-signing-sdk": "^1.0.0",

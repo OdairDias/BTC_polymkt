@@ -61,7 +61,13 @@ const DEFAULTS = {
     maxBinanceLagMs: 0,
     maxSnapshotAgeMs: 0,
     sniperDeltaFloorUsd: 5,
-    sniperDeltaAtrMult: 0
+    sniperDeltaAtrMult: 0,
+    sizingMode: "fixed",
+    kellyFraction: 0.25,
+    kellyMinNotionalUsd: 0.25,
+    kellyMaxNotionalUsd: 1.0,
+    maxDailyLossUsd: 0,
+    riskDayTimezone: "America/Sao_Paulo"
   },
 
   /** Execução CLOB (conta real). Chaves só via env — nunca no código. */
@@ -126,6 +132,11 @@ function sanitizePaperFillMode(value, fallback = "pessimistic") {
   return s === "optimistic" || s === "pessimistic" ? s : fallback;
 }
 
+function sanitizeSizingMode(value, fallback = "fixed") {
+  const s = String(value ?? "").trim().toLowerCase();
+  return s === "fixed" || s === "kelly" ? s : fallback;
+}
+
 function mergeStrategyVariant(base, candidate) {
   const c = candidate && typeof candidate === "object" ? candidate : {};
   const takeProfitPrice = Number(c.takeProfitPrice ?? base.takeProfitPrice);
@@ -145,6 +156,10 @@ function mergeStrategyVariant(base, candidate) {
   const maxSnapshotAgeMs = Number(c.maxSnapshotAgeMs ?? base.maxSnapshotAgeMs);
   const sniperDeltaFloorUsd = Number(c.sniperDeltaFloorUsd ?? base.sniperDeltaFloorUsd);
   const sniperDeltaAtrMult = Number(c.sniperDeltaAtrMult ?? base.sniperDeltaAtrMult);
+  const kellyFraction = Number(c.kellyFraction ?? base.kellyFraction);
+  const kellyMinNotionalUsd = Number(c.kellyMinNotionalUsd ?? base.kellyMinNotionalUsd);
+  const kellyMaxNotionalUsd = Number(c.kellyMaxNotionalUsd ?? base.kellyMaxNotionalUsd);
+  const maxDailyLossUsd = Number(c.maxDailyLossUsd ?? base.maxDailyLossUsd);
   return {
     key: sanitizeStrategyVariantKey(c.key, "default"),
     label: String(c.label ?? c.key ?? "default"),
@@ -206,6 +221,24 @@ function mergeStrategyVariant(base, candidate) {
       Number.isFinite(sniperDeltaAtrMult) && sniperDeltaAtrMult >= 0
         ? Math.max(0, sniperDeltaAtrMult)
         : 0,
+    sizingMode: sanitizeSizingMode(c.sizingMode ?? base.sizingMode, "fixed"),
+    kellyFraction:
+      Number.isFinite(kellyFraction) && kellyFraction >= 0
+        ? Math.min(1, kellyFraction)
+        : 0.25,
+    kellyMinNotionalUsd:
+      Number.isFinite(kellyMinNotionalUsd) && kellyMinNotionalUsd > 0
+        ? Math.max(0.01, kellyMinNotionalUsd)
+        : 0.25,
+    kellyMaxNotionalUsd:
+      Number.isFinite(kellyMaxNotionalUsd) && kellyMaxNotionalUsd > 0
+        ? Math.max(0.01, kellyMaxNotionalUsd)
+        : Math.max(0.01, Number(c.notionalUsd ?? base.notionalUsd)),
+    maxDailyLossUsd:
+      Number.isFinite(maxDailyLossUsd) && maxDailyLossUsd > 0
+        ? Math.max(0.01, maxDailyLossUsd)
+        : 0,
+    riskDayTimezone: String(c.riskDayTimezone ?? base.riskDayTimezone ?? "America/Sao_Paulo").trim() || "America/Sao_Paulo",
     entryCloseMinutesLeft: Number.isFinite(Number(c.entryCloseMinutesLeft)) ? Number(c.entryCloseMinutesLeft) : base.entryCloseMinutesLeft,
     liveEntryOrderType: sanitizeMarketOrderType(c.liveEntryOrderType ?? base.liveEntryOrderType),
     liveExitOrderType: sanitizeMarketOrderType(c.liveExitOrderType ?? base.liveExitOrderType),
@@ -368,7 +401,33 @@ export const CONFIG = {
     sniperDeltaAtrMult: Math.max(
       0,
       Number(process.env.STRATEGY_SNIPER_DELTA_ATR_MULT) || DEFAULTS.strategy.sniperDeltaAtrMult
-    )
+    ),
+    sizingMode: sanitizeSizingMode(
+      process.env.STRATEGY_SIZING_MODE,
+      DEFAULTS.strategy.sizingMode
+    ),
+    kellyFraction: Math.min(
+      1,
+      Math.max(
+        0,
+        Number(process.env.STRATEGY_KELLY_FRACTION) || DEFAULTS.strategy.kellyFraction
+      )
+    ),
+    kellyMinNotionalUsd: Math.max(
+      0.01,
+      Number(process.env.STRATEGY_KELLY_MIN_NOTIONAL_USD) || DEFAULTS.strategy.kellyMinNotionalUsd
+    ),
+    kellyMaxNotionalUsd: Math.max(
+      0.01,
+      Number(process.env.STRATEGY_KELLY_MAX_NOTIONAL_USD) || DEFAULTS.strategy.kellyMaxNotionalUsd
+    ),
+    maxDailyLossUsd: Math.max(
+      0,
+      Number(process.env.STRATEGY_MAX_DAILY_LOSS_USD) || DEFAULTS.strategy.maxDailyLossUsd
+    ),
+    riskDayTimezone:
+      String(process.env.STRATEGY_RISK_DAY_TIMEZONE || DEFAULTS.strategy.riskDayTimezone).trim() ||
+      DEFAULTS.strategy.riskDayTimezone
   },
 
   live: {
@@ -425,6 +484,12 @@ const baseVariant = {
   maxSnapshotAgeMs: CONFIG.strategy.maxSnapshotAgeMs,
   sniperDeltaFloorUsd: CONFIG.strategy.sniperDeltaFloorUsd,
   sniperDeltaAtrMult: CONFIG.strategy.sniperDeltaAtrMult,
+  sizingMode: CONFIG.strategy.sizingMode,
+  kellyFraction: CONFIG.strategy.kellyFraction,
+  kellyMinNotionalUsd: CONFIG.strategy.kellyMinNotionalUsd,
+  kellyMaxNotionalUsd: CONFIG.strategy.kellyMaxNotionalUsd,
+  maxDailyLossUsd: CONFIG.strategy.maxDailyLossUsd,
+  riskDayTimezone: CONFIG.strategy.riskDayTimezone,
   entryCloseMinutesLeft: null,
   liveEntryOrderType: "FOK",
   liveExitOrderType: "FOK",

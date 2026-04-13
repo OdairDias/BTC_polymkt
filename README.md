@@ -107,6 +107,11 @@ Opcional: gravar **uma decisão simulada por mercado** quando o relógio **entra
 - `STRATEGY_PRICE_EPSILON` (default: `0.001`) — empate se `|up_mid - down_mid| <= epsilon`.
 - `STRATEGY_NOTIONAL_USD` (default: `1`).
 - `STRATEGY_OUTCOME_LAST_SECONDS` (default: `5`) — ao **entrar** na janela final (tempo restante ≤ N segundos e > 0), grava o resultado na segunda tabela.
+- `STRATEGY_SIZING_MODE` (`fixed` | `kelly`, default: `fixed`) — sizing dinâmico por confiança (Kelly fracionado).
+- `STRATEGY_KELLY_FRACTION` (default: `0.25`) — agressividade do Kelly (0 a 1).
+- `STRATEGY_KELLY_MIN_NOTIONAL_USD` / `STRATEGY_KELLY_MAX_NOTIONAL_USD` — piso/teto de notional quando `kelly` está ativo.
+- `STRATEGY_MAX_DAILY_LOSS_USD` (default: `0`, desativado) — kill-switch diário por perda acumulada.
+- `STRATEGY_RISK_DAY_TIMEZONE` (default: `America/Sao_Paulo`) — timezone da virada diária para o guard de risco.
 
 **Tabelas Postgres** (criadas no primeiro uso; ver `db/schema.sql`):
 
@@ -268,6 +273,20 @@ The report includes:
 - Entry attribution reasons (`entry_reason_code`) for filled entries
 - Config and commit trace (`config_hash` + `git_commit`)
 - Paper vs live comparison (entries, slippage, realized pnl)
+
+## Walk-forward OOS
+
+Run out-of-sample walk-forward to tune edge/probability thresholds on train and validate on future folds.
+
+```bash
+npm run walkforward:strategy -- --days=30 --strategy=cheap_15m_tp35 --test-hours=24
+```
+
+JSON output:
+
+```bash
+npm run walkforward:strategy -- --days=45 --strategy=cheap_15m_tp35 --json
+```
 
 ## Safety
 

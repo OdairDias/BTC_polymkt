@@ -118,7 +118,7 @@ Um trader profissional não "clica no botão" se a fila estiver contra ele.
 
 ### Marco 5 — Risco e Governança Profissional
 
-**Status:** `parcialmente concluído` (staleness/latência e guards ativos; sizing Kelly e kill-switch diário de capital ainda não implementados).
+**Status:** `concluído` (staleness/latência, sizing Kelly e kill-switch diário implementados).
 
 - **Sizing Dinâmico (Kelly)**: Ajustar notional baseado na confiança do sinal.
 - **Capital Guard**: Prod com `maxRollingLossUsd` e kill switch diário.
@@ -128,7 +128,7 @@ Um trader profissional não "clica no botão" se a fila estiver contra ele.
 
 ### Marco 6 — Relatórios e Walk-Forward
 
-**Status:** `concluído` (script `scripts/report-strategy.mjs` com Brier, decis de edge, SKIPs e paper-vs-live).
+**Status:** `concluído` (scripts `report-strategy` e `walkforward-strategy` com Brier, decil de edge, SKIPs, paper-vs-live e validação OOS).
 
 - Script que gera o **Brier Score** semanal.
 - Relatório de acerto por decil de Edge (ex: trades com Edge > 15% acertam 70% das vezes?).
@@ -157,7 +157,7 @@ Para transformar o bot de um "seguidor de indicadores" em uma **máquina de extr
 
 ## 12. Checklist "Pronto para Escalar"
 
-1. [ ] Backtest Out-of-Sample validado mensalmente.
+1. [x] Walk-forward Out-of-Sample implementado (pronto para execução mensal).
 2. [x] Slippage Pessimista no paper ≥ 0.
 3. [x] Kill-Switch de Latência e Staleness ativo.
 4. [x] Log de Atribuição completo (por que entrei?).

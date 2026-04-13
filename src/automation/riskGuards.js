@@ -1,4 +1,4 @@
-import { fetchOutcomeRiskStats } from "../db/postgresStrategy.js";
+import { fetchDailyRiskStats, fetchOutcomeRiskStats } from "../db/postgresStrategy.js";
 
 function asNumber(x) {
   const n = Number(x);
@@ -58,7 +58,9 @@ export async function evaluateRiskStatsGuard({
   strategyKey = "default",
   maxConsecutiveLosses,
   rollingLossHours,
-  maxRollingLossUsd
+  maxRollingLossUsd,
+  maxDailyLossUsd = 0,
+  riskDayTimezone = "America/Sao_Paulo"
 }) {
   const streakLimit = Math.max(1, Math.floor(Number(maxConsecutiveLosses) || 1));
   const maxLoss = Math.max(0.01, Number(maxRollingLossUsd) || 0.01);
@@ -71,6 +73,27 @@ export async function evaluateRiskStatsGuard({
   });
   const rollingPnl = Number(stats.rollingPnlUsd) || 0;
   const streak = Number(stats.consecutiveLosses) || 0;
+  const maxDailyLoss = Math.max(0, Number(maxDailyLossUsd) || 0);
+
+  let daily = null;
+  if (maxDailyLoss > 0) {
+    daily = await fetchDailyRiskStats(pgClient, {
+      strategyKey,
+      riskDayTimezone
+    });
+    const dailyPnl = Number(daily.dailyPnlUsd) || 0;
+    if (dailyPnl <= -maxDailyLoss) {
+      return {
+        allowed: false,
+        resultCode: "SKIP_RISK_DAILY_LOSS",
+        line: `Risk: dailyPnL ${dailyPnl.toFixed(2)} <= -${maxDailyLoss.toFixed(2)} (${daily.riskDayTimezone})`,
+        stats: {
+          ...stats,
+          daily
+        }
+      };
+    }
+  }
 
   if (rollingPnl <= -maxLoss) {
     return {
@@ -93,7 +116,13 @@ export async function evaluateRiskStatsGuard({
   return {
     allowed: true,
     resultCode: "OK",
-    line: `Risk ok: rollingPnL ${rollingPnl.toFixed(2)} | streak ${streak}`,
-    stats
+    line:
+      maxDailyLoss > 0 && daily
+        ? `Risk ok: rollingPnL ${rollingPnl.toFixed(2)} | streak ${streak} | dailyPnL ${Number(daily.dailyPnlUsd).toFixed(2)}`
+        : `Risk ok: rollingPnL ${rollingPnl.toFixed(2)} | streak ${streak}`,
+    stats: {
+      ...stats,
+      daily
+    }
   };
 }
