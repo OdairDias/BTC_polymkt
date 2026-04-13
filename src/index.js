@@ -375,6 +375,16 @@ function describeStrategyVariant(variant) {
     variant.grossProfitTargetUsd ? `gp=$${variant.grossProfitTargetUsd}` : null,
     variant.minEdge ? `minEdge=${variant.minEdge}` : null,
     variant.minModelProb ? `minProb=${variant.minModelProb}` : null,
+    variant.paperFillMode ? `paperFill=${variant.paperFillMode}` : null,
+    Number.isFinite(Number(variant.maxOracleLagMs)) && Number(variant.maxOracleLagMs) > 0
+      ? `maxOracleLag=${Math.floor(Number(variant.maxOracleLagMs))}ms`
+      : null,
+    Number.isFinite(Number(variant.maxBinanceLagMs)) && Number(variant.maxBinanceLagMs) > 0
+      ? `maxBinanceLag=${Math.floor(Number(variant.maxBinanceLagMs))}ms`
+      : null,
+    Number.isFinite(Number(variant.maxSnapshotAgeMs)) && Number(variant.maxSnapshotAgeMs) > 0
+      ? `maxSnapAge=${Math.floor(Number(variant.maxSnapshotAgeMs))}ms`
+      : null,
     `liveEntry=${variant.liveEntryOrderType ?? "FOK"}`,
     `liveExit=${variant.liveExitOrderType ?? variant.liveEntryOrderType ?? "FOK"}`
   ].filter(Boolean).join(" ");
@@ -499,9 +509,10 @@ async function resolveCurrentBtcMarket(marketConfig = {}) {
 }
 
 async function fetchPolymarketSnapshot(marketConfig = {}) {
+  const fetchedAtMs = Date.now();
   const market = await resolveCurrentBtcMarket(marketConfig);
 
-  if (!market) return { ok: false, reason: "market_not_found" };
+  if (!market) return { ok: false, reason: "market_not_found", fetchedAtMs };
 
   const outcomes = Array.isArray(market.outcomes) ? market.outcomes : (typeof market.outcomes === "string" ? JSON.parse(market.outcomes) : []);
   const outcomePrices = Array.isArray(market.outcomePrices)
@@ -533,6 +544,7 @@ async function fetchPolymarketSnapshot(marketConfig = {}) {
     return {
       ok: false,
       reason: "missing_token_ids",
+      fetchedAtMs,
       market,
       outcomes,
       clobTokenIds,
@@ -578,6 +590,7 @@ async function fetchPolymarketSnapshot(marketConfig = {}) {
 
   return {
     ok: true,
+    fetchedAtMs,
     market,
     tokens: { upTokenId, downTokenId },
     prices: {
@@ -911,8 +924,22 @@ async function main() {
       let liveOrderStatusLine = null;
       let outcomeStatusLine = null;
       if (CONFIG.strategy.enabled) {
+        const loopNowMs = Date.now();
+        const binanceLagMs = Number.isFinite(Number(wsTick?.ts))
+          ? Math.max(0, loopNowMs - Number(wsTick.ts))
+          : null;
+        const oracleUpdatedAtMs = Number.isFinite(Number(chainlink?.updatedAt))
+          ? Number(chainlink.updatedAt)
+          : null;
+        const oracleLagMs = oracleUpdatedAtMs != null
+          ? Math.max(0, loopNowMs - oracleUpdatedAtMs)
+          : null;
+
         for (const snapshotGroup of marketSnapshots) {
           const groupPoly = snapshotGroup.poly;
+          const snapshotAgeMs = Number.isFinite(Number(groupPoly?.fetchedAtMs))
+            ? Math.max(0, loopNowMs - Number(groupPoly.fetchedAtMs))
+            : null;
           const groupSettlementMs = groupPoly.ok && groupPoly.market?.endDate
             ? new Date(groupPoly.market.endDate).getTime()
             : null;
@@ -952,6 +979,12 @@ async function main() {
           const st = await runPaperStrategyTick({
             poly: groupPoly,
             settlementLeftMin: groupSettlementLeftMin,
+            dataHealth: {
+              oracleLagMs,
+              binanceLagMs,
+              snapshotAgeMs,
+              oracleSource: chainlink?.source ?? null
+            },
             ptbDelta: groupPtbDelta,
             modelUp: groupModelUp,
             modelDown: groupModelDown,

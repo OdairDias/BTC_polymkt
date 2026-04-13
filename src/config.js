@@ -52,7 +52,16 @@ const DEFAULTS = {
     minEdge: 0,
     minModelProb: 0,
     minBookImbalance: 0,
-    maxSpreadToEdgeRatio: 0
+    maxSpreadToEdgeRatio: 0,
+    paperFillMode: "pessimistic",
+    paperEntrySlippageBps: 20,
+    paperExitSlippageBps: 25,
+    paperSpreadPenaltyFactor: 0.25,
+    maxOracleLagMs: 0,
+    maxBinanceLagMs: 0,
+    maxSnapshotAgeMs: 0,
+    sniperDeltaFloorUsd: 5,
+    sniperDeltaAtrMult: 0
   },
 
   /** Execução CLOB (conta real). Chaves só via env — nunca no código. */
@@ -112,6 +121,11 @@ function sanitizeMarketOrderType(value, fallback = "FOK") {
   return s === "FAK" || s === "FOK" ? s : fallback;
 }
 
+function sanitizePaperFillMode(value, fallback = "pessimistic") {
+  const s = String(value ?? "").trim().toLowerCase();
+  return s === "optimistic" || s === "pessimistic" ? s : fallback;
+}
+
 function mergeStrategyVariant(base, candidate) {
   const c = candidate && typeof candidate === "object" ? candidate : {};
   const takeProfitPrice = Number(c.takeProfitPrice ?? base.takeProfitPrice);
@@ -123,6 +137,14 @@ function mergeStrategyVariant(base, candidate) {
   const minModelProb = Number(c.minModelProb ?? base.minModelProb);
   const minBookImbalance = Number(c.minBookImbalance ?? base.minBookImbalance);
   const maxSpreadToEdgeRatio = Number(c.maxSpreadToEdgeRatio ?? base.maxSpreadToEdgeRatio);
+  const paperEntrySlippageBps = Number(c.paperEntrySlippageBps ?? base.paperEntrySlippageBps);
+  const paperExitSlippageBps = Number(c.paperExitSlippageBps ?? base.paperExitSlippageBps);
+  const paperSpreadPenaltyFactor = Number(c.paperSpreadPenaltyFactor ?? base.paperSpreadPenaltyFactor);
+  const maxOracleLagMs = Number(c.maxOracleLagMs ?? base.maxOracleLagMs);
+  const maxBinanceLagMs = Number(c.maxBinanceLagMs ?? base.maxBinanceLagMs);
+  const maxSnapshotAgeMs = Number(c.maxSnapshotAgeMs ?? base.maxSnapshotAgeMs);
+  const sniperDeltaFloorUsd = Number(c.sniperDeltaFloorUsd ?? base.sniperDeltaFloorUsd);
+  const sniperDeltaAtrMult = Number(c.sniperDeltaAtrMult ?? base.sniperDeltaAtrMult);
   return {
     key: sanitizeStrategyVariantKey(c.key, "default"),
     label: String(c.label ?? c.key ?? "default"),
@@ -151,6 +173,39 @@ function mergeStrategyVariant(base, candidate) {
       Number.isFinite(maxSpreadToEdgeRatio) && maxSpreadToEdgeRatio > 0
         ? Math.max(0.01, maxSpreadToEdgeRatio)
         : null,
+    paperFillMode: sanitizePaperFillMode(c.paperFillMode ?? base.paperFillMode, "pessimistic"),
+    paperEntrySlippageBps:
+      Number.isFinite(paperEntrySlippageBps) && paperEntrySlippageBps >= 0
+        ? Math.max(0, paperEntrySlippageBps)
+        : 0,
+    paperExitSlippageBps:
+      Number.isFinite(paperExitSlippageBps) && paperExitSlippageBps >= 0
+        ? Math.max(0, paperExitSlippageBps)
+        : 0,
+    paperSpreadPenaltyFactor:
+      Number.isFinite(paperSpreadPenaltyFactor) && paperSpreadPenaltyFactor >= 0
+        ? Math.max(0, paperSpreadPenaltyFactor)
+        : 0,
+    maxOracleLagMs:
+      Number.isFinite(maxOracleLagMs) && maxOracleLagMs > 0
+        ? Math.max(1, Math.floor(maxOracleLagMs))
+        : null,
+    maxBinanceLagMs:
+      Number.isFinite(maxBinanceLagMs) && maxBinanceLagMs > 0
+        ? Math.max(1, Math.floor(maxBinanceLagMs))
+        : null,
+    maxSnapshotAgeMs:
+      Number.isFinite(maxSnapshotAgeMs) && maxSnapshotAgeMs > 0
+        ? Math.max(1, Math.floor(maxSnapshotAgeMs))
+        : null,
+    sniperDeltaFloorUsd:
+      Number.isFinite(sniperDeltaFloorUsd) && sniperDeltaFloorUsd > 0
+        ? Math.max(0.1, sniperDeltaFloorUsd)
+        : 5,
+    sniperDeltaAtrMult:
+      Number.isFinite(sniperDeltaAtrMult) && sniperDeltaAtrMult >= 0
+        ? Math.max(0, sniperDeltaAtrMult)
+        : 0,
     entryCloseMinutesLeft: Number.isFinite(Number(c.entryCloseMinutesLeft)) ? Number(c.entryCloseMinutesLeft) : base.entryCloseMinutesLeft,
     liveEntryOrderType: sanitizeMarketOrderType(c.liveEntryOrderType ?? base.liveEntryOrderType),
     liveExitOrderType: sanitizeMarketOrderType(c.liveExitOrderType ?? base.liveExitOrderType),
@@ -277,6 +332,42 @@ export const CONFIG = {
     maxSpreadToEdgeRatio: Math.max(
       0,
       Number(process.env.STRATEGY_MAX_SPREAD_TO_EDGE_RATIO) || DEFAULTS.strategy.maxSpreadToEdgeRatio
+    ),
+    paperFillMode: sanitizePaperFillMode(
+      process.env.STRATEGY_PAPER_FILL_MODE,
+      DEFAULTS.strategy.paperFillMode
+    ),
+    paperEntrySlippageBps: Math.max(
+      0,
+      Number(process.env.STRATEGY_PAPER_ENTRY_SLIPPAGE_BPS) || DEFAULTS.strategy.paperEntrySlippageBps
+    ),
+    paperExitSlippageBps: Math.max(
+      0,
+      Number(process.env.STRATEGY_PAPER_EXIT_SLIPPAGE_BPS) || DEFAULTS.strategy.paperExitSlippageBps
+    ),
+    paperSpreadPenaltyFactor: Math.max(
+      0,
+      Number(process.env.STRATEGY_PAPER_SPREAD_PENALTY_FACTOR) || DEFAULTS.strategy.paperSpreadPenaltyFactor
+    ),
+    maxOracleLagMs: Math.max(
+      0,
+      Math.floor(Number(process.env.STRATEGY_MAX_ORACLE_LAG_MS) || DEFAULTS.strategy.maxOracleLagMs)
+    ),
+    maxBinanceLagMs: Math.max(
+      0,
+      Math.floor(Number(process.env.STRATEGY_MAX_BINANCE_LAG_MS) || DEFAULTS.strategy.maxBinanceLagMs)
+    ),
+    maxSnapshotAgeMs: Math.max(
+      0,
+      Math.floor(Number(process.env.STRATEGY_MAX_SNAPSHOT_AGE_MS) || DEFAULTS.strategy.maxSnapshotAgeMs)
+    ),
+    sniperDeltaFloorUsd: Math.max(
+      0.1,
+      Number(process.env.STRATEGY_SNIPER_DELTA_FLOOR_USD) || DEFAULTS.strategy.sniperDeltaFloorUsd
+    ),
+    sniperDeltaAtrMult: Math.max(
+      0,
+      Number(process.env.STRATEGY_SNIPER_DELTA_ATR_MULT) || DEFAULTS.strategy.sniperDeltaAtrMult
     )
   },
 
@@ -325,6 +416,15 @@ const baseVariant = {
   minModelProb: CONFIG.strategy.minModelProb,
   minBookImbalance: CONFIG.strategy.minBookImbalance,
   maxSpreadToEdgeRatio: CONFIG.strategy.maxSpreadToEdgeRatio,
+  paperFillMode: CONFIG.strategy.paperFillMode,
+  paperEntrySlippageBps: CONFIG.strategy.paperEntrySlippageBps,
+  paperExitSlippageBps: CONFIG.strategy.paperExitSlippageBps,
+  paperSpreadPenaltyFactor: CONFIG.strategy.paperSpreadPenaltyFactor,
+  maxOracleLagMs: CONFIG.strategy.maxOracleLagMs,
+  maxBinanceLagMs: CONFIG.strategy.maxBinanceLagMs,
+  maxSnapshotAgeMs: CONFIG.strategy.maxSnapshotAgeMs,
+  sniperDeltaFloorUsd: CONFIG.strategy.sniperDeltaFloorUsd,
+  sniperDeltaAtrMult: CONFIG.strategy.sniperDeltaAtrMult,
   entryCloseMinutesLeft: null,
   liveEntryOrderType: "FOK",
   liveExitOrderType: "FOK",

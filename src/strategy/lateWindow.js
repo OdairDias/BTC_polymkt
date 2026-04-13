@@ -26,6 +26,9 @@ export function decideLateWindowSide({
   minModelProb,
   minBookImbalance,
   maxSpreadToEdgeRatio,
+  volAtrUsd,
+  sniperDeltaFloorUsd,
+  sniperDeltaAtrMult,
   epsilon,
   ptbDelta,
   rsiNow,
@@ -168,10 +171,18 @@ export function decideLateWindowSide({
   }
 
   // sniper_v2
+  const floorDelta = Number(sniperDeltaFloorUsd);
+  const atrMult = Number(sniperDeltaAtrMult);
+  const atr = Number(volAtrUsd);
+  const dynamicDeltaThreshold = Math.max(
+    Number.isFinite(floorDelta) && floorDelta > 0 ? floorDelta : 5,
+    Number.isFinite(atr) && atr > 0 && Number.isFinite(atrMult) && atrMult > 0 ? atr * atrMult : 0
+  );
+
   let chosenSide = null;
   if (ptbDelta !== undefined && ptbDelta !== null && Number.isFinite(ptbDelta)) {
-    if (ptbDelta >= 5) chosenSide = "UP";
-    else if (ptbDelta <= -5) chosenSide = "DOWN";
+    if (ptbDelta >= dynamicDeltaThreshold) chosenSide = "UP";
+    else if (ptbDelta <= -dynamicDeltaThreshold) chosenSide = "DOWN";
   }
 
   if (!chosenSide) {

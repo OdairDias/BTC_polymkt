@@ -11,6 +11,7 @@ import {
 } from "../db/postgresStrategy.js";
 import { decideLateWindowSide } from "../strategy/lateWindow.js";
 import { computeRealizedExitPnl } from "../strategy/outcomeInfer.js";
+import { applyPaperExecutionPrice, normalizePaperFillMode } from "../strategy/executionModel.js";
 import { midFromBook } from "../strategy/pricing.js";
 import { resetLiveClobClient } from "./liveClob.js";
 import {
@@ -64,7 +65,18 @@ function getVariants(variantSubset = null) {
       grossProfitTargetUsd: CONFIG.strategy.grossProfitTargetUsd,
       forceExitMinutesLeft: CONFIG.strategy.forceExitMinutesLeft,
       minEdge: CONFIG.strategy.minEdge,
-      minModelProb: CONFIG.strategy.minModelProb
+      minModelProb: CONFIG.strategy.minModelProb,
+      minBookImbalance: CONFIG.strategy.minBookImbalance,
+      maxSpreadToEdgeRatio: CONFIG.strategy.maxSpreadToEdgeRatio,
+      paperFillMode: CONFIG.strategy.paperFillMode,
+      paperEntrySlippageBps: CONFIG.strategy.paperEntrySlippageBps,
+      paperExitSlippageBps: CONFIG.strategy.paperExitSlippageBps,
+      paperSpreadPenaltyFactor: CONFIG.strategy.paperSpreadPenaltyFactor,
+      maxOracleLagMs: CONFIG.strategy.maxOracleLagMs,
+      maxBinanceLagMs: CONFIG.strategy.maxBinanceLagMs,
+      maxSnapshotAgeMs: CONFIG.strategy.maxSnapshotAgeMs,
+      sniperDeltaFloorUsd: CONFIG.strategy.sniperDeltaFloorUsd,
+      sniperDeltaAtrMult: CONFIG.strategy.sniperDeltaAtrMult
     }
   ];
 }
@@ -201,6 +213,72 @@ function computeBookSpread(book) {
   return fallbackSpread >= 0 ? fallbackSpread : null;
 }
 
+function getPaperExecutionConfig(variant) {
+  return {
+    fillMode: normalizePaperFillMode(variant?.paperFillMode ?? CONFIG.strategy.paperFillMode, "pessimistic"),
+    entrySlippageBps: Math.max(0, Number(variant?.paperEntrySlippageBps ?? CONFIG.strategy.paperEntrySlippageBps) || 0),
+    exitSlippageBps: Math.max(0, Number(variant?.paperExitSlippageBps ?? CONFIG.strategy.paperExitSlippageBps) || 0),
+    spreadPenaltyFactor: Math.max(0, Number(variant?.paperSpreadPenaltyFactor ?? CONFIG.strategy.paperSpreadPenaltyFactor) || 0)
+  };
+}
+
+function applyPaperEntryPrice({ basePrice, side, poly, executionConfig }) {
+  const spread = computeBookSpread(sideBook(poly, side));
+  return applyPaperExecutionPrice({
+    action: "buy",
+    referencePrice: basePrice,
+    spread,
+    fillMode: executionConfig.fillMode,
+    slippageBps: executionConfig.entrySlippageBps,
+    spreadPenaltyFactor: executionConfig.spreadPenaltyFactor
+  });
+}
+
+function applyPaperExitPrice({ basePrice, side, poly, executionConfig }) {
+  const spread = computeBookSpread(sideBook(poly, side));
+  return applyPaperExecutionPrice({
+    action: "sell",
+    referencePrice: basePrice,
+    spread,
+    fillMode: executionConfig.fillMode,
+    slippageBps: executionConfig.exitSlippageBps,
+    spreadPenaltyFactor: executionConfig.spreadPenaltyFactor
+  });
+}
+
+function evaluateDataHealthGuard({ variant, dataHealth }) {
+  const oracleLag = toFiniteNumber(dataHealth?.oracleLagMs);
+  const binanceLag = toFiniteNumber(dataHealth?.binanceLagMs);
+  const snapshotAge = toFiniteNumber(dataHealth?.snapshotAgeMs);
+
+  const maxOracleLagMs = Number(variant?.maxOracleLagMs ?? CONFIG.strategy.maxOracleLagMs);
+  const maxBinanceLagMs = Number(variant?.maxBinanceLagMs ?? CONFIG.strategy.maxBinanceLagMs);
+  const maxSnapshotAgeMs = Number(variant?.maxSnapshotAgeMs ?? CONFIG.strategy.maxSnapshotAgeMs);
+
+  if (Number.isFinite(maxOracleLagMs) && maxOracleLagMs > 0 && oracleLag != null && oracleLag > maxOracleLagMs) {
+    return {
+      allowed: false,
+      resultCode: "SKIP_ORACLE_STALE",
+      line: `DATA STALE: oracle lag ${Math.round(oracleLag)}ms > ${Math.round(maxOracleLagMs)}ms`
+    };
+  }
+  if (Number.isFinite(maxBinanceLagMs) && maxBinanceLagMs > 0 && binanceLag != null && binanceLag > maxBinanceLagMs) {
+    return {
+      allowed: false,
+      resultCode: "SKIP_BINANCE_STALE",
+      line: `DATA STALE: binance lag ${Math.round(binanceLag)}ms > ${Math.round(maxBinanceLagMs)}ms`
+    };
+  }
+  if (Number.isFinite(maxSnapshotAgeMs) && maxSnapshotAgeMs > 0 && snapshotAge != null && snapshotAge > maxSnapshotAgeMs) {
+    return {
+      allowed: false,
+      resultCode: "SKIP_SNAPSHOT_STALE",
+      line: `DATA STALE: snapshot age ${Math.round(snapshotAge)}ms > ${Math.round(maxSnapshotAgeMs)}ms`
+    };
+  }
+  return { allowed: true, resultCode: null, line: null };
+}
+
 function toFiniteNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
@@ -237,6 +315,7 @@ export function resetStrategyDbStateForTests() {
 export async function runPaperStrategyTick({
   poly,
   settlementLeftMin,
+  dataHealth = null,
   ptbDelta,
   modelUp,
   modelDown,
@@ -306,6 +385,7 @@ export async function runPaperStrategyTick({
       const enteredSet = enteredMarketsByStrategy.get(key) ?? new Set();
       const tag = paperEnabled ? "DRY" : "LIVE";
       const takeProfit = getTakeProfitConfig(variant);
+      const paperExecution = getPaperExecutionConfig(variant);
       const liveEntryOrderType = String(variant?.liveEntryOrderType || "FOK").toUpperCase();
       const liveExitOrderType = String(variant?.liveExitOrderType || liveEntryOrderType || "FOK").toUpperCase();
       let localLiveLine = lastLiveLineByStrategy.get(key) ?? null;
@@ -366,6 +446,14 @@ export async function runPaperStrategyTick({
             clearTakeProfitState(paperTakeProfitState);
           } else {
             const bidPrice = toFiniteNumber(sideBestBid(poly, paperTakeProfitState.side));
+            const executableBidPrice = bidPrice != null
+              ? applyPaperExitPrice({
+                basePrice: bidPrice,
+                side: paperTakeProfitState.side,
+                poly,
+                executionConfig: paperExecution
+              })
+              : null;
             const hasLiquidity = hasEnoughBookLiquidity({
               side: paperTakeProfitState.side,
               poly,
@@ -373,10 +461,18 @@ export async function runPaperStrategyTick({
               liquiditySide: "bid"
             });
             const targetPrice = toFiniteNumber(paperTakeProfitState.targetPrice);
+            const executableTargetPrice = targetPrice != null
+              ? applyPaperExitPrice({
+                basePrice: targetPrice,
+                side: paperTakeProfitState.side,
+                poly,
+                executionConfig: paperExecution
+              })
+              : null;
             const grossProfitTargetUsd = toFiniteNumber(takeProfit.grossProfitTargetUsd);
             const forceExitMinutesLeft = toFiniteNumber(paperTakeProfitState.forceExitMinutesLeft);
             const grossExit = computeGrossExitSnapshot({
-              bidPrice,
+              bidPrice: executableBidPrice,
               sizeShares: paperTakeProfitState.sizeShares,
               notionalUsd: paperTakeProfitState.notionalUsd
             });
@@ -389,7 +485,7 @@ export async function runPaperStrategyTick({
             if (targetPrice != null && bidPrice != null && bidPrice >= targetPrice && hasLiquidity) {
               const realized = computeRealizedExitPnl({
                 entryPrice: paperTakeProfitState.entryPrice,
-                exitPrice: targetPrice,
+                exitPrice: executableTargetPrice,
                 notionalUsd: paperTakeProfitState.notionalUsd
               });
               await insertPaperOutcome(client, {
@@ -417,11 +513,11 @@ export async function runPaperStrategyTick({
                 entry_correct: true,
                 pnl_simulated_usd: realized.pnl,
                 dry_run: s.dryRun,
-                exit_price: targetPrice,
+                exit_price: executableTargetPrice,
                 exit_reason: "TAKE_PROFIT",
                 exited_early: true
               });
-              localPaperLine = `${ANSI_GREEN}${tag} TP ${paperTakeProfitState.side} @${targetPrice.toFixed(3)} (PnL ~$${(realized.pnl ?? 0).toFixed(2)})${ANSI_RESET}`;
+              localPaperLine = `${ANSI_GREEN}${tag} TP ${paperTakeProfitState.side} @${executableTargetPrice.toFixed(3)} (PnL ~$${(realized.pnl ?? 0).toFixed(2)})${ANSI_RESET}`;
               clearTakeProfitState(paperTakeProfitState);
             } else if (targetPrice != null && bidPrice != null && bidPrice >= targetPrice && !hasLiquidity) {
               localPaperLine = `${ANSI_GRAY}${tag} TP aguardando liquidez @ ${targetPrice.toFixed(2)}${ANSI_RESET}`;
@@ -434,7 +530,7 @@ export async function runPaperStrategyTick({
             ) {
               const realized = computeRealizedExitPnl({
                 entryPrice: paperTakeProfitState.entryPrice,
-                exitPrice: bidPrice,
+                exitPrice: executableBidPrice,
                 notionalUsd: paperTakeProfitState.notionalUsd
               });
               await insertPaperOutcome(client, {
@@ -462,25 +558,25 @@ export async function runPaperStrategyTick({
                 entry_correct: true,
                 pnl_simulated_usd: realized.pnl,
                 dry_run: s.dryRun,
-                exit_price: bidPrice,
+                exit_price: executableBidPrice,
                 exit_reason: "GROSS_PROFIT",
                 exited_early: true
               });
-              localPaperLine = `${ANSI_GREEN}${tag} GROSS PROFIT ${paperTakeProfitState.side} @${bidPrice.toFixed(3)} (gross +$${grossExit.grossProfitUsd.toFixed(2)})${ANSI_RESET}`;
+              localPaperLine = `${ANSI_GREEN}${tag} GROSS PROFIT ${paperTakeProfitState.side} @${executableBidPrice.toFixed(3)} (gross +$${grossExit.grossProfitUsd.toFixed(2)})${ANSI_RESET}`;
               clearTakeProfitState(paperTakeProfitState);
             } else if (
               grossProfitTargetUsd != null &&
               grossExit.grossProfitUsd != null &&
               grossExit.grossProfitUsd >= grossProfitTargetUsd &&
-              bidPrice != null &&
+              executableBidPrice != null &&
               !hasLiquidity
             ) {
               localPaperLine = `${ANSI_GRAY}${tag} GROSS PROFIT tocou, mas sem liquidez suficiente no bid${ANSI_RESET}`;
             } else if (timeStopDue) {
-              if (bidPrice != null && bidPrice > 0 && hasLiquidity) {
+              if (executableBidPrice != null && executableBidPrice > 0 && hasLiquidity) {
                 const realized = computeRealizedExitPnl({
                   entryPrice: paperTakeProfitState.entryPrice,
-                  exitPrice: bidPrice,
+                  exitPrice: executableBidPrice,
                   notionalUsd: paperTakeProfitState.notionalUsd
                 });
                 const entryCorrect =
@@ -510,11 +606,11 @@ export async function runPaperStrategyTick({
                   entry_correct: entryCorrect,
                   pnl_simulated_usd: realized.pnl,
                   dry_run: s.dryRun,
-                  exit_price: bidPrice,
+                  exit_price: executableBidPrice,
                   exit_reason: "TIME_STOP",
                   exited_early: true
                 });
-                localPaperLine = `${ANSI_YELLOW}${tag} TIME STOP ${paperTakeProfitState.side} @${bidPrice.toFixed(3)} (PnL ~$${(realized.pnl ?? 0).toFixed(2)})${ANSI_RESET}`;
+                localPaperLine = `${ANSI_YELLOW}${tag} TIME STOP ${paperTakeProfitState.side} @${executableBidPrice.toFixed(3)} (PnL ~$${(realized.pnl ?? 0).toFixed(2)})${ANSI_RESET}`;
                 clearTakeProfitState(paperTakeProfitState);
               } else {
                 localPaperLine = `${ANSI_GRAY}${tag} TIME STOP aguardando bid/liquidez${ANSI_RESET}`;
@@ -812,6 +908,9 @@ export async function runPaperStrategyTick({
         minModelProb: variant.minModelProb,
         minBookImbalance: variant.minBookImbalance,
         maxSpreadToEdgeRatio: variant.maxSpreadToEdgeRatio,
+        volAtrUsd,
+        sniperDeltaFloorUsd: variant.sniperDeltaFloorUsd,
+        sniperDeltaAtrMult: variant.sniperDeltaAtrMult,
         epsilon: variant.priceEpsilon,
         ptbDelta,
         rsiNow,
@@ -864,6 +963,26 @@ export async function runPaperStrategyTick({
           } else {
             entryPrice = variant.targetEntryPrice;
           }
+        }
+      }
+
+      if (paperEnabled && (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") && entryPrice != null) {
+        const modeledEntryPrice = applyPaperEntryPrice({
+          basePrice: entryPrice,
+          side: effectiveDecision.side,
+          poly,
+          executionConfig: paperExecution
+        });
+        if (modeledEntryPrice != null) {
+          entryPrice = modeledEntryPrice;
+        }
+      }
+
+      if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
+        const dataHealthCheck = evaluateDataHealthGuard({ variant, dataHealth });
+        if (!dataHealthCheck.allowed) {
+          effectiveDecision = { ...effectiveDecision, side: null, result: dataHealthCheck.resultCode };
+          localLiveLine = `${ANSI_GRAY}${dataHealthCheck.line}${ANSI_RESET}`;
         }
       }
 

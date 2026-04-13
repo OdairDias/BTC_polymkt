@@ -23,6 +23,9 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 - Filtro de probabilidade: `minModelProb=0.56`
 - Filtro de microestrutura (book): `minBookImbalance=0.80`
 - Filtro de custo de execução: `maxSpreadToEdgeRatio=0.50`
+- Paper fill conservador: `paperFillMode=pessimistic`
+- Slippage paper: `paperEntrySlippageBps=25`, `paperExitSlippageBps=35`
+- Guard de staleness: `maxOracleLagMs=20000`, `maxBinanceLagMs=6000`, `maxSnapshotAgeMs=4000`
 - Saida por tempo: `forceExitMinutesLeft=2.5`
 - Tipo de ordem: `liveEntryOrderType=FAK`, `liveExitOrderType=FAK`
 
@@ -40,7 +43,7 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
    - book imbalance do lado escolhido precisa ser >= `0.80` (bid/ask de liquidez)
    - spread do lado escolhido precisa ser menor que `0.50 * edge` (evita pagar friccao demais)
 6. No live, a entrada FAK faz um preflight no book e pode virar `skip` se nao houver asks/lote suficiente ate o preco aceito naquele instante.
-7. Depois da entrada, monitora o `best bid` da posicao aberta.
+7. No paper, aplica modelo pessimista de execucao (slippage + penalidade de spread) para evitar PnL otimista.
 8. Se o bid bater `0.45`, sai no lucro antes do vencimento.
 9. Mesmo sem bater `0.45`, se o lucro bruto realizavel ja for de pelo menos `+$0.22`, sai no bid atual para nao devolver ganho.
 10. Se o alvo nao vier e o tempo estiver acabando, tenta sair quando faltarem `2.5` minutos.
@@ -102,6 +105,10 @@ Os logs mostram qual caminho foi usado:
   - evita comprar lado com fila muito fraca no bid em relacao ao ask
 - `maxSpreadToEdgeRatio=0.50`
   - rejeita trades onde o spread consome metade (ou mais) da vantagem estatistica estimada
+- `paperFillMode=pessimistic`
+  - simula entrada/saida de forma conservadora (mais perto do que ocorre em execucao real)
+- `maxOracleLagMs=20000`, `maxBinanceLagMs=6000`, `maxSnapshotAgeMs=4000`
+  - evita abrir novas posicoes quando os dados chegam velhos (stale)
 
 ## Leituras praticas
 
