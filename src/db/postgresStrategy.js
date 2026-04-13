@@ -152,6 +152,10 @@ export async function ensureStrategySchema(client) {
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_edge NUMERIC;
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS book_imbalance NUMERIC;
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_spread NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS entry_reason_code TEXT;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS entry_context_json JSONB;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS config_hash TEXT;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS git_commit TEXT;
 
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
@@ -240,9 +244,10 @@ export async function insertPaperSignal(client, row) {
       result_code, chosen_side, notional_usd, entry_price, simulated_shares, dry_run,
       oracle_price, binance_spot_price, price_to_beat, ptb_delta_usd,
       model_prob_up, market_prob_up, edge_up, vol_atr_usd,
-      selected_model_prob, selected_market_prob, selected_edge, book_imbalance, selected_spread
+      selected_model_prob, selected_market_prob, selected_edge, book_imbalance, selected_spread,
+      entry_reason_code, entry_context_json, config_hash, git_commit
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34::jsonb,$35,$36
     )
     ON CONFLICT (strategy_key, market_slug) DO NOTHING
     RETURNING id`,
@@ -278,7 +283,11 @@ export async function insertPaperSignal(client, row) {
       row.selected_market_prob ?? null,
       row.selected_edge ?? null,
       row.book_imbalance ?? null,
-      row.selected_spread ?? null
+      row.selected_spread ?? null,
+      row.entry_reason_code ?? null,
+      row.entry_context_json != null ? JSON.stringify(row.entry_context_json) : null,
+      row.config_hash ?? null,
+      row.git_commit ?? null
     ]
   );
   if (res.rowCount > 0 && res.rows[0]?.id != null) {
@@ -296,9 +305,10 @@ export async function ensurePaperSignal(client, row) {
       result_code, chosen_side, notional_usd, entry_price, simulated_shares, dry_run,
       oracle_price, binance_spot_price, price_to_beat, ptb_delta_usd,
       model_prob_up, market_prob_up, edge_up, vol_atr_usd,
-      selected_model_prob, selected_market_prob, selected_edge, book_imbalance, selected_spread
+      selected_model_prob, selected_market_prob, selected_edge, book_imbalance, selected_spread,
+      entry_reason_code, entry_context_json, config_hash, git_commit
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34::jsonb,$35,$36
     )
     ON CONFLICT (strategy_key, market_slug) DO UPDATE SET
       condition_id = COALESCE(EXCLUDED.condition_id, strategy_paper_signals.condition_id),
@@ -330,7 +340,11 @@ export async function ensurePaperSignal(client, row) {
       selected_market_prob = COALESCE(EXCLUDED.selected_market_prob, strategy_paper_signals.selected_market_prob),
       selected_edge = COALESCE(EXCLUDED.selected_edge, strategy_paper_signals.selected_edge),
       book_imbalance = COALESCE(EXCLUDED.book_imbalance, strategy_paper_signals.book_imbalance),
-      selected_spread = COALESCE(EXCLUDED.selected_spread, strategy_paper_signals.selected_spread)
+      selected_spread = COALESCE(EXCLUDED.selected_spread, strategy_paper_signals.selected_spread),
+      entry_reason_code = COALESCE(EXCLUDED.entry_reason_code, strategy_paper_signals.entry_reason_code),
+      entry_context_json = COALESCE(EXCLUDED.entry_context_json, strategy_paper_signals.entry_context_json),
+      config_hash = COALESCE(EXCLUDED.config_hash, strategy_paper_signals.config_hash),
+      git_commit = COALESCE(EXCLUDED.git_commit, strategy_paper_signals.git_commit)
     RETURNING id`,
     [
       row.strategy_key ?? "default",
@@ -364,7 +378,11 @@ export async function ensurePaperSignal(client, row) {
       row.selected_market_prob ?? null,
       row.selected_edge ?? null,
       row.book_imbalance ?? null,
-      row.selected_spread ?? null
+      row.selected_spread ?? null,
+      row.entry_reason_code ?? null,
+      row.entry_context_json != null ? JSON.stringify(row.entry_context_json) : null,
+      row.config_hash ?? null,
+      row.git_commit ?? null
     ]
   );
   return { id: res.rows[0]?.id ?? null };

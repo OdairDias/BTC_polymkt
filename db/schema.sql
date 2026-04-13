@@ -34,6 +34,10 @@ CREATE TABLE IF NOT EXISTS strategy_paper_signals (
   selected_edge NUMERIC,
   book_imbalance NUMERIC,
   selected_spread NUMERIC,
+  entry_reason_code TEXT,
+  entry_context_json JSONB,
+  config_hash TEXT,
+  git_commit TEXT,
   UNIQUE(strategy_key, market_slug)
 );
 
@@ -98,6 +102,10 @@ ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_market_prob
 ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_edge NUMERIC;
 ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS book_imbalance NUMERIC;
 ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_spread NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS entry_reason_code TEXT;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS entry_context_json JSONB;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS config_hash TEXT;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS git_commit TEXT;
 ALTER TABLE strategy_paper_signals DROP CONSTRAINT IF EXISTS strategy_paper_signals_market_slug_key;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_strategy_paper_signals_strategy_slug
   ON strategy_paper_signals(strategy_key, market_slug);

@@ -160,7 +160,7 @@ Para transformar o bot de um "seguidor de indicadores" em uma **máquina de extr
 1. [ ] Backtest Out-of-Sample validado mensalmente.
 2. [x] Slippage Pessimista no paper ≥ 0.
 3. [x] Kill-Switch de Latência e Staleness ativo.
-4. [ ] Log de Atribuição completo (por que entrei?).
+4. [x] Log de Atribuição completo (por que entrei?).
 
 ---
 

@@ -1,4 +1,5 @@
 import { CONFIG } from "../config.js";
+import { createHash } from "node:crypto";
 import {
   ensureStrategySchemaOnce,
   ensurePaperSignal,
@@ -38,6 +39,146 @@ const liveTakeProfitStateByStrategy = new Map();
 const lastPaperLineByStrategy = new Map();
 const lastLiveLineByStrategy = new Map();
 const enteredMarketsByStrategy = new Map();
+const runtimeGitCommit =
+  String(
+    process.env.RAILWAY_GIT_COMMIT_SHA ||
+      process.env.GIT_COMMIT ||
+      process.env.SOURCE_VERSION ||
+      process.env.VERCEL_GIT_COMMIT_SHA ||
+      ""
+  ).trim() || "unknown";
+
+function sortKeysDeep(value) {
+  if (Array.isArray(value)) {
+    return value.map(sortKeysDeep);
+  }
+  if (value && typeof value === "object") {
+    const out = {};
+    for (const key of Object.keys(value).sort()) {
+      out[key] = sortKeysDeep(value[key]);
+    }
+    return out;
+  }
+  return value;
+}
+
+function hashConfigPayload(payload) {
+  const stable = JSON.stringify(sortKeysDeep(payload));
+  return createHash("sha256").update(stable).digest("hex").slice(0, 16);
+}
+
+function buildVariantConfigHash(variant) {
+  return hashConfigPayload({
+    candleWindowMinutes: CONFIG.candleWindowMinutes,
+    liveStrategyKey: CONFIG.strategy.liveStrategyKey,
+    variant: {
+      key: variant?.key ?? "default",
+      decisionMode: variant?.decisionMode ?? "sniper_v2",
+      contrarian: Boolean(variant?.contrarian),
+      entryMinutesLeft: variant?.entryMinutesLeft ?? null,
+      entryCloseMinutesLeft: variant?.entryCloseMinutesLeft ?? null,
+      targetEntryPrice: variant?.targetEntryPrice ?? null,
+      minEntryPrice: variant?.minEntryPrice ?? null,
+      priceEpsilon: variant?.priceEpsilon ?? null,
+      notionalUsd: variant?.notionalUsd ?? null,
+      maxEntryPrice: variant?.maxEntryPrice ?? null,
+      minPayoutMultiple: variant?.minPayoutMultiple ?? null,
+      takeProfitEnabled: variant?.takeProfitEnabled ?? null,
+      takeProfitPrice: variant?.takeProfitPrice ?? null,
+      grossProfitTargetUsd: variant?.grossProfitTargetUsd ?? null,
+      forceExitMinutesLeft: variant?.forceExitMinutesLeft ?? null,
+      minEdge: variant?.minEdge ?? null,
+      minModelProb: variant?.minModelProb ?? null,
+      minBookImbalance: variant?.minBookImbalance ?? null,
+      maxSpreadToEdgeRatio: variant?.maxSpreadToEdgeRatio ?? null,
+      paperFillMode: variant?.paperFillMode ?? null,
+      paperEntrySlippageBps: variant?.paperEntrySlippageBps ?? null,
+      paperExitSlippageBps: variant?.paperExitSlippageBps ?? null,
+      paperSpreadPenaltyFactor: variant?.paperSpreadPenaltyFactor ?? null,
+      maxOracleLagMs: variant?.maxOracleLagMs ?? null,
+      maxBinanceLagMs: variant?.maxBinanceLagMs ?? null,
+      maxSnapshotAgeMs: variant?.maxSnapshotAgeMs ?? null,
+      sniperDeltaFloorUsd: variant?.sniperDeltaFloorUsd ?? null,
+      sniperDeltaAtrMult: variant?.sniperDeltaAtrMult ?? null,
+      liveEntryOrderType: variant?.liveEntryOrderType ?? null,
+      liveExitOrderType: variant?.liveExitOrderType ?? null,
+      marketSlugPrefix: variant?.marketSlugPrefix ?? null,
+      marketWindowMinutes: variant?.marketWindowMinutes ?? null,
+      marketSeriesId: variant?.marketSeriesId ?? null,
+      marketSeriesSlug: variant?.marketSeriesSlug ?? null
+    }
+  });
+}
+
+function buildEntryAttributionContext({
+  variant,
+  effectiveDecision,
+  paperResultCode,
+  settlementLeftMin,
+  entryPrice,
+  simulatedShares,
+  upMid,
+  downMid,
+  upBuy,
+  downBuy,
+  upSpread,
+  downSpread,
+  upBookImbalance,
+  downBookImbalance,
+  modelUp,
+  modelDown,
+  marketUp,
+  marketDown,
+  ptbDelta,
+  oraclePrice,
+  binanceSpotPrice,
+  priceToBeat,
+  volAtrUsd,
+  rsiNow,
+  macd,
+  haNarrative,
+  dataHealth
+}) {
+  return {
+    decision_mode: variant?.decisionMode ?? "sniper_v2",
+    decision_result: effectiveDecision?.result ?? null,
+    entry_record_result_code: paperResultCode ?? null,
+    side: effectiveDecision?.side ?? null,
+    minutes_left: toFiniteNumber(settlementLeftMin),
+    entry_price: toFiniteNumber(entryPrice),
+    simulated_shares: toFiniteNumber(simulatedShares),
+    selected_model_prob: toFiniteNumber(effectiveDecision?.selectedModelProb),
+    selected_market_prob: toFiniteNumber(effectiveDecision?.selectedMarketProb),
+    selected_edge: toFiniteNumber(effectiveDecision?.selectedEdge),
+    selected_book_imbalance: toFiniteNumber(effectiveDecision?.selectedBookImbalance),
+    selected_spread: toFiniteNumber(effectiveDecision?.selectedSpread),
+    ptb_delta_usd: toFiniteNumber(ptbDelta),
+    oracle_price: toFiniteNumber(oraclePrice),
+    binance_spot_price: toFiniteNumber(binanceSpotPrice),
+    price_to_beat: toFiniteNumber(priceToBeat),
+    vol_atr_usd: toFiniteNumber(volAtrUsd),
+    model_up: toFiniteNumber(modelUp),
+    model_down: toFiniteNumber(modelDown),
+    market_up: toFiniteNumber(marketUp),
+    market_down: toFiniteNumber(marketDown),
+    up_mid: toFiniteNumber(upMid),
+    down_mid: toFiniteNumber(downMid),
+    up_buy: toFiniteNumber(upBuy),
+    down_buy: toFiniteNumber(downBuy),
+    up_spread: toFiniteNumber(upSpread),
+    down_spread: toFiniteNumber(downSpread),
+    up_book_imbalance: toFiniteNumber(upBookImbalance),
+    down_book_imbalance: toFiniteNumber(downBookImbalance),
+    rsi: toFiniteNumber(rsiNow),
+    macd_hist: toFiniteNumber(macd?.hist),
+    ha_narrative: haNarrative ?? null,
+    data_health: {
+      oracle_lag_ms: toFiniteNumber(dataHealth?.oracleLagMs),
+      binance_lag_ms: toFiniteNumber(dataHealth?.binanceLagMs),
+      snapshot_age_ms: toFiniteNumber(dataHealth?.snapshotAgeMs)
+    }
+  };
+}
 
 function getVariants(variantSubset = null) {
   if (Array.isArray(variantSubset) && variantSubset.length) {
@@ -1050,6 +1191,36 @@ export async function runPaperStrategyTick({
       const paperChosenSide = anchoredSniper ? null : effectiveDecision.side;
       const paperEntryPrice = anchoredSniper ? null : entryPrice;
       const paperSimulatedShares = anchoredSniper ? null : simulatedShares;
+      const configHash = buildVariantConfigHash(variant);
+      const entryAttributionContext = buildEntryAttributionContext({
+        variant,
+        effectiveDecision,
+        paperResultCode,
+        settlementLeftMin,
+        entryPrice: paperEntryPrice,
+        simulatedShares: paperSimulatedShares,
+        upMid,
+        downMid,
+        upBuy,
+        downBuy,
+        upSpread,
+        downSpread,
+        upBookImbalance,
+        downBookImbalance,
+        modelUp,
+        modelDown,
+        marketUp,
+        marketDown,
+        ptbDelta,
+        oraclePrice,
+        binanceSpotPrice,
+        priceToBeat,
+        volAtrUsd,
+        rsiNow,
+        macd,
+        haNarrative,
+        dataHealth
+      });
 
       const signalRecord = await ensurePaperSignal(client, {
         strategy_key: key,
@@ -1098,7 +1269,11 @@ export async function runPaperStrategyTick({
           effectiveDecision?.selectedSpread ??
           ((effectiveDecision?.side === "UP" || effectiveDecision?.side === "DOWN")
             ? computeBookSpread(sideBook(poly, effectiveDecision.side))
-            : null)
+            : null),
+        entry_reason_code: effectiveDecision?.result ?? null,
+        entry_context_json: entryAttributionContext,
+        config_hash: configHash,
+        git_commit: runtimeGitCommit
       });
       const signalId = signalRecord.id;
       let liveEntry = null;
