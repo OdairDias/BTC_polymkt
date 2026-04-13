@@ -8,7 +8,8 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "test:creds": "node scripts/test-polymarket-creds.mjs"
+    "test:creds": "node scripts/test-polymarket-creds.mjs",
+    "report:strategy": "node scripts/report-strategy.mjs"
   },
   "dependencies": {
     "@polymarket/builder-signing-sdk": "^1.0.0",

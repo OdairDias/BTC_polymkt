@@ -245,6 +245,28 @@ npm start
 - If the console looks like it “spams” lines:
   - The renderer uses `readline.cursorTo` + `clearScreenDown` for a stable, static screen, but some terminals may still behave differently.
 
+## Strategy report (Marco 6)
+
+Use the report script to evaluate calibration and execution quality from Postgres.
+
+```bash
+npm run report:strategy -- --hours=24
+```
+
+Optional filters:
+
+```bash
+npm run report:strategy -- --hours=48 --strategy=cheap_15m_tp35
+npm run report:strategy -- --hours=24 --json
+```
+
+The report includes:
+- EV/trade and total pnl by strategy
+- Brier score (calibration) by strategy
+- Hit rate and avg pnl by edge decile
+- Top skip reasons
+- Paper vs live comparison (entries, slippage, realized pnl)
+
 ## Safety
 
 This is not financial advice. Use at your own risk.
