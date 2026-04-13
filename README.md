@@ -265,6 +265,8 @@ The report includes:
 - Brier score (calibration) by strategy
 - Hit rate and avg pnl by edge decile
 - Top skip reasons
+- Entry attribution reasons (`entry_reason_code`) for filled entries
+- Config and commit trace (`config_hash` + `git_commit`)
 - Paper vs live comparison (entries, slippage, realized pnl)
 
 ## Safety

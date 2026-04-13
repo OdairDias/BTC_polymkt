@@ -140,7 +140,7 @@ Um trader profissional não "clica no botão" se a fila estiver contra ele.
 Esta secção complementa o projeto com práticas de **institucional/mesa quant**.
 
 - **9.1 Observabilidade**: Logar latência fim-a-fim e detectar "dados obsoletos" (staleness).
-- **9.2 Rastreabilidade**: Cada trade vinculado ao `git_commit` e `config_hash`.
+- **9.2 Rastreabilidade**: Cada trade vinculado ao `git_commit` e `config_hash` (`concluído`).
 - **9.3 Microestrutura Avançada**: Velocidade de mudança do mid e inconsistência binária (sum mids != 1.00).
 
 ---

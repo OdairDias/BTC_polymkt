@@ -258,6 +258,46 @@ async function main() {
       [hours, strategyFilter]
     );
 
+    const attributionRes = await safeQuery(
+      client,
+      `
+      SELECT
+        s.strategy_key,
+        COALESCE(s.entry_reason_code, 'UNKNOWN') AS entry_reason_code,
+        COUNT(*)::int AS qty,
+        AVG(s.entry_price)::float8 AS avg_entry_price,
+        AVG(s.selected_edge)::float8 AS avg_selected_edge,
+        AVG(s.selected_model_prob)::float8 AS avg_selected_model_prob
+      FROM strategy_paper_signals s
+      WHERE s.created_at >= NOW() - ($1::text || ' hours')::interval
+        AND s.chosen_side IN ('UP', 'DOWN')
+        AND ($2::text IS NULL OR s.strategy_key = $2)
+      GROUP BY s.strategy_key, COALESCE(s.entry_reason_code, 'UNKNOWN')
+      ORDER BY qty DESC
+      LIMIT 30
+      `,
+      [hours, strategyFilter]
+    );
+
+    const configTraceRes = await safeQuery(
+      client,
+      `
+      SELECT
+        s.strategy_key,
+        COALESCE(s.config_hash, 'NO_HASH') AS config_hash,
+        COALESCE(s.git_commit, 'NO_COMMIT') AS git_commit,
+        COUNT(*)::int AS qty,
+        MAX(s.created_at) AS last_seen_at
+      FROM strategy_paper_signals s
+      WHERE s.created_at >= NOW() - ($1::text || ' hours')::interval
+        AND ($2::text IS NULL OR s.strategy_key = $2)
+      GROUP BY s.strategy_key, COALESCE(s.config_hash, 'NO_HASH'), COALESCE(s.git_commit, 'NO_COMMIT')
+      ORDER BY qty DESC, last_seen_at DESC
+      LIMIT 30
+      `,
+      [hours, strategyFilter]
+    );
+
     const liveRes = await safeQuery(
       client,
       `
@@ -328,12 +368,16 @@ async function main() {
       brier: brierRes.rows,
       edge_deciles: edgeDecilesRes.rows,
       skip_reasons: skipReasonsRes.rows,
+      entry_attribution: attributionRes.rows,
+      config_trace: configTraceRes.rows,
       paper_vs_live: liveRes.rows,
       errors: {
         summary: summaryRes.ok ? null : summaryRes.error,
         brier: brierRes.ok ? null : brierRes.error,
         edge_deciles: edgeDecilesRes.ok ? null : edgeDecilesRes.error,
         skip_reasons: skipReasonsRes.ok ? null : skipReasonsRes.error,
+        entry_attribution: attributionRes.ok ? null : attributionRes.error,
+        config_trace: configTraceRes.ok ? null : configTraceRes.error,
         paper_vs_live: liveRes.ok ? null : liveRes.error
       }
     };
@@ -413,6 +457,39 @@ async function main() {
       });
     }
 
+    if (!attributionRes.ok) {
+      console.log(`\n[WARN] Falha na atribuicao de entrada: ${attributionRes.error}`);
+    } else {
+      printTable({
+        title: "Atribuicao de Entrada",
+        rows: attributionRes.rows,
+        columns: [
+          { key: "strategy_key", label: "strategy" },
+          { key: "entry_reason_code", label: "entry_reason" },
+          { key: "qty", label: "qty" },
+          { key: "avg_entry_price", label: "avg_entry", render: (r) => fmtNumber(r.avg_entry_price, 4) },
+          { key: "avg_selected_edge", label: "avg_edge", render: (r) => fmtNumber(r.avg_selected_edge, 5) },
+          { key: "avg_selected_model_prob", label: "avg_model", render: (r) => fmtPct01(r.avg_selected_model_prob, 2) }
+        ]
+      });
+    }
+
+    if (!configTraceRes.ok) {
+      console.log(`\n[WARN] Falha no trace de configuracao: ${configTraceRes.error}`);
+    } else {
+      printTable({
+        title: "Trace Config/Git",
+        rows: configTraceRes.rows,
+        columns: [
+          { key: "strategy_key", label: "strategy" },
+          { key: "config_hash", label: "config_hash" },
+          { key: "git_commit", label: "git_commit" },
+          { key: "qty", label: "qty" },
+          { key: "last_seen_at", label: "last_seen" }
+        ]
+      });
+    }
+
     if (!liveRes.ok) {
       console.log(`\n[WARN] Falha no comparativo paper/live: ${liveRes.error}`);
     } else {
@@ -443,4 +520,3 @@ main().catch((err) => {
   console.error(err?.message ?? String(err));
   process.exit(1);
 });
-
