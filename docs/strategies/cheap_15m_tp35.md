@@ -2,7 +2,7 @@
 
 ## Em uma frase (para leigos)
 
-Esta estrategia compra cedo o lado mais barato do mercado de `15 minutos` e tenta sair com lucro em `0.25` ou antes, quando o lucro bruto realizavel ja estiver bom, sem precisar esperar o resultado final.
+Esta estrategia compra cedo o lado mais barato do mercado de `15 minutos` e tenta sair com lucro em `0.45` ou antes, quando o lucro bruto realizavel ja estiver bom, sem precisar esperar o resultado final.
 
 ## Objetivo
 
@@ -21,6 +21,8 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 - Trava de lucro bruto: `grossProfitTargetUsd=0.22`
 - Filtro de edge: `minEdge=0.04`
 - Filtro de probabilidade: `minModelProb=0.56`
+- Filtro de microestrutura (book): `minBookImbalance=0.80`
+- Filtro de custo de execução: `maxSpreadToEdgeRatio=0.50`
 - Saida por tempo: `forceExitMinutesLeft=2.5`
 - Tipo de ordem: `liveEntryOrderType=FAK`, `liveExitOrderType=FAK`
 
@@ -35,6 +37,8 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
    - nao pode estar abaixo de `0.05`
    - edge modelado do lado escolhido precisa ser >= `0.04`
    - probabilidade modelada do lado escolhido precisa ser >= `0.56`
+   - book imbalance do lado escolhido precisa ser >= `0.80` (bid/ask de liquidez)
+   - spread do lado escolhido precisa ser menor que `0.50 * edge` (evita pagar friccao demais)
 6. No live, a entrada FAK faz um preflight no book e pode virar `skip` se nao houver asks/lote suficiente ate o preco aceito naquele instante.
 7. Depois da entrada, monitora o `best bid` da posicao aberta.
 8. Se o bid bater `0.45`, sai no lucro antes do vencimento.
@@ -94,6 +98,10 @@ Os logs mostram qual caminho foi usado:
   - evita entrada quando o proprio modelo nao esta convicto o suficiente
 - `forceExitMinutesLeft=2.5`
   - saida por tempo quando faltam 2.5 min, evita carregar ate o fim
+- `minBookImbalance=0.80`
+  - evita comprar lado com fila muito fraca no bid em relacao ao ask
+- `maxSpreadToEdgeRatio=0.50`
+  - rejeita trades onde o spread consome metade (ou mais) da vantagem estatistica estimada
 
 ## Leituras praticas
 

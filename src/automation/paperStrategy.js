@@ -180,6 +180,27 @@ function sideBestBid(poly, side) {
   return book?.bestBid ?? null;
 }
 
+function sideBook(poly, side) {
+  return side === "UP" ? poly?.orderbook?.up : poly?.orderbook?.down;
+}
+
+function computeBookImbalance(book) {
+  const bidLiq = toFiniteNumber(book?.bidLiquidity);
+  const askLiq = toFiniteNumber(book?.askLiquidity);
+  if (bidLiq == null || askLiq == null || askLiq <= 0) return null;
+  return bidLiq / askLiq;
+}
+
+function computeBookSpread(book) {
+  const spread = toFiniteNumber(book?.spread);
+  if (spread != null && spread >= 0) return spread;
+  const bestBid = toFiniteNumber(book?.bestBid);
+  const bestAsk = toFiniteNumber(book?.bestAsk);
+  if (bestBid == null || bestAsk == null) return null;
+  const fallbackSpread = bestAsk - bestBid;
+  return fallbackSpread >= 0 ? fallbackSpread : null;
+}
+
 function toFiniteNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
@@ -264,6 +285,10 @@ export async function runPaperStrategyTick({
   const downBuy = poly.prices?.down ?? null;
   const upMid = midFromBook(upBook, upBuy);
   const downMid = midFromBook(downBook, downBuy);
+  const upBookImbalance = computeBookImbalance(upBook);
+  const downBookImbalance = computeBookImbalance(downBook);
+  const upSpread = computeBookSpread(upBook);
+  const downSpread = computeBookSpread(downBook);
 
   const pool = getStrategyPool(s.databaseUrl);
   await ensureStrategySchemaOnce(pool);
@@ -773,6 +798,10 @@ export async function runPaperStrategyTick({
         downMid,
         upBuy,
         downBuy,
+        upBookImbalance,
+        downBookImbalance,
+        upSpread,
+        downSpread,
         modelUp,
         modelDown,
         marketUp,
@@ -781,6 +810,8 @@ export async function runPaperStrategyTick({
         minEntryPrice: variant.minEntryPrice,
         minEdge: variant.minEdge,
         minModelProb: variant.minModelProb,
+        minBookImbalance: variant.minBookImbalance,
+        maxSpreadToEdgeRatio: variant.maxSpreadToEdgeRatio,
         epsilon: variant.priceEpsilon,
         ptbDelta,
         rsiNow,
@@ -935,7 +966,20 @@ export async function runPaperStrategyTick({
           Number.isFinite(Number(modelUp)) && Number.isFinite(Number(marketUp))
             ? Number(modelUp) - Number(marketUp)
             : null,
-        vol_atr_usd: volAtrUsd ?? null
+        vol_atr_usd: volAtrUsd ?? null,
+        selected_model_prob: effectiveDecision?.selectedModelProb ?? null,
+        selected_market_prob: effectiveDecision?.selectedMarketProb ?? null,
+        selected_edge: effectiveDecision?.selectedEdge ?? null,
+        book_imbalance:
+          effectiveDecision?.selectedBookImbalance ??
+          ((effectiveDecision?.side === "UP" || effectiveDecision?.side === "DOWN")
+            ? computeBookImbalance(sideBook(poly, effectiveDecision.side))
+            : null),
+        selected_spread:
+          effectiveDecision?.selectedSpread ??
+          ((effectiveDecision?.side === "UP" || effectiveDecision?.side === "DOWN")
+            ? computeBookSpread(sideBook(poly, effectiveDecision.side))
+            : null)
       });
       const signalId = signalRecord.id;
       let liveEntry = null;

@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS strategy_paper_signals (
   market_prob_up NUMERIC,
   edge_up NUMERIC,
   vol_atr_usd NUMERIC,
+  selected_model_prob NUMERIC,
+  selected_market_prob NUMERIC,
+  selected_edge NUMERIC,
+  book_imbalance NUMERIC,
+  selected_spread NUMERIC,
   UNIQUE(strategy_key, market_slug)
 );
 
@@ -88,6 +93,11 @@ ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS model_prob_up NUMERI
 ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS market_prob_up NUMERIC;
 ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS edge_up NUMERIC;
 ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS vol_atr_usd NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_model_prob NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_market_prob NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_edge NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS book_imbalance NUMERIC;
+ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_spread NUMERIC;
 ALTER TABLE strategy_paper_signals DROP CONSTRAINT IF EXISTS strategy_paper_signals_market_slug_key;
 CREATE UNIQUE INDEX IF NOT EXISTS uq_strategy_paper_signals_strategy_slug
   ON strategy_paper_signals(strategy_key, market_slug);

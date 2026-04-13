@@ -147,6 +147,11 @@ export async function ensureStrategySchema(client) {
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS market_prob_up NUMERIC;
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS edge_up NUMERIC;
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS vol_atr_usd NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_model_prob NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_market_prob NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_edge NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS book_imbalance NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_spread NUMERIC;
 
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS strategy_key TEXT NOT NULL DEFAULT 'default';
@@ -234,9 +239,10 @@ export async function insertPaperSignal(client, row) {
       up_best_bid, up_best_ask, down_best_bid, down_best_ask,
       result_code, chosen_side, notional_usd, entry_price, simulated_shares, dry_run,
       oracle_price, binance_spot_price, price_to_beat, ptb_delta_usd,
-      model_prob_up, market_prob_up, edge_up, vol_atr_usd
+      model_prob_up, market_prob_up, edge_up, vol_atr_usd,
+      selected_model_prob, selected_market_prob, selected_edge, book_imbalance, selected_spread
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32
     )
     ON CONFLICT (strategy_key, market_slug) DO NOTHING
     RETURNING id`,
@@ -267,7 +273,12 @@ export async function insertPaperSignal(client, row) {
       row.model_prob_up ?? null,
       row.market_prob_up ?? null,
       row.edge_up ?? null,
-      row.vol_atr_usd ?? null
+      row.vol_atr_usd ?? null,
+      row.selected_model_prob ?? null,
+      row.selected_market_prob ?? null,
+      row.selected_edge ?? null,
+      row.book_imbalance ?? null,
+      row.selected_spread ?? null
     ]
   );
   if (res.rowCount > 0 && res.rows[0]?.id != null) {
@@ -284,9 +295,10 @@ export async function ensurePaperSignal(client, row) {
       up_best_bid, up_best_ask, down_best_bid, down_best_ask,
       result_code, chosen_side, notional_usd, entry_price, simulated_shares, dry_run,
       oracle_price, binance_spot_price, price_to_beat, ptb_delta_usd,
-      model_prob_up, market_prob_up, edge_up, vol_atr_usd
+      model_prob_up, market_prob_up, edge_up, vol_atr_usd,
+      selected_model_prob, selected_market_prob, selected_edge, book_imbalance, selected_spread
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32
     )
     ON CONFLICT (strategy_key, market_slug) DO UPDATE SET
       condition_id = COALESCE(EXCLUDED.condition_id, strategy_paper_signals.condition_id),
@@ -313,7 +325,12 @@ export async function ensurePaperSignal(client, row) {
       model_prob_up = COALESCE(EXCLUDED.model_prob_up, strategy_paper_signals.model_prob_up),
       market_prob_up = COALESCE(EXCLUDED.market_prob_up, strategy_paper_signals.market_prob_up),
       edge_up = COALESCE(EXCLUDED.edge_up, strategy_paper_signals.edge_up),
-      vol_atr_usd = COALESCE(EXCLUDED.vol_atr_usd, strategy_paper_signals.vol_atr_usd)
+      vol_atr_usd = COALESCE(EXCLUDED.vol_atr_usd, strategy_paper_signals.vol_atr_usd),
+      selected_model_prob = COALESCE(EXCLUDED.selected_model_prob, strategy_paper_signals.selected_model_prob),
+      selected_market_prob = COALESCE(EXCLUDED.selected_market_prob, strategy_paper_signals.selected_market_prob),
+      selected_edge = COALESCE(EXCLUDED.selected_edge, strategy_paper_signals.selected_edge),
+      book_imbalance = COALESCE(EXCLUDED.book_imbalance, strategy_paper_signals.book_imbalance),
+      selected_spread = COALESCE(EXCLUDED.selected_spread, strategy_paper_signals.selected_spread)
     RETURNING id`,
     [
       row.strategy_key ?? "default",
@@ -342,7 +359,12 @@ export async function ensurePaperSignal(client, row) {
       row.model_prob_up ?? null,
       row.market_prob_up ?? null,
       row.edge_up ?? null,
-      row.vol_atr_usd ?? null
+      row.vol_atr_usd ?? null,
+      row.selected_model_prob ?? null,
+      row.selected_market_prob ?? null,
+      row.selected_edge ?? null,
+      row.book_imbalance ?? null,
+      row.selected_spread ?? null
     ]
   );
   return { id: res.rows[0]?.id ?? null };

@@ -50,7 +50,9 @@ const DEFAULTS = {
     grossProfitTargetUsd: 0,
     forceExitMinutesLeft: 0,
     minEdge: 0,
-    minModelProb: 0
+    minModelProb: 0,
+    minBookImbalance: 0,
+    maxSpreadToEdgeRatio: 0
   },
 
   /** Execução CLOB (conta real). Chaves só via env — nunca no código. */
@@ -119,6 +121,8 @@ function mergeStrategyVariant(base, candidate) {
   const marketWindowMinutes = Number(c.marketWindowMinutes ?? base.marketWindowMinutes);
   const minEdge = Number(c.minEdge ?? base.minEdge);
   const minModelProb = Number(c.minModelProb ?? base.minModelProb);
+  const minBookImbalance = Number(c.minBookImbalance ?? base.minBookImbalance);
+  const maxSpreadToEdgeRatio = Number(c.maxSpreadToEdgeRatio ?? base.maxSpreadToEdgeRatio);
   return {
     key: sanitizeStrategyVariantKey(c.key, "default"),
     label: String(c.label ?? c.key ?? "default"),
@@ -142,6 +146,11 @@ function mergeStrategyVariant(base, candidate) {
     forceExitMinutesLeft: Number.isFinite(forceExitMinutesLeft) && forceExitMinutesLeft > 0 ? forceExitMinutesLeft : null,
     minEdge: Number.isFinite(minEdge) && minEdge > 0 ? Math.min(0.99, minEdge) : null,
     minModelProb: Number.isFinite(minModelProb) && minModelProb > 0 ? Math.min(0.99, minModelProb) : null,
+    minBookImbalance: Number.isFinite(minBookImbalance) && minBookImbalance > 0 ? Math.max(0.01, minBookImbalance) : null,
+    maxSpreadToEdgeRatio:
+      Number.isFinite(maxSpreadToEdgeRatio) && maxSpreadToEdgeRatio > 0
+        ? Math.max(0.01, maxSpreadToEdgeRatio)
+        : null,
     entryCloseMinutesLeft: Number.isFinite(Number(c.entryCloseMinutesLeft)) ? Number(c.entryCloseMinutesLeft) : base.entryCloseMinutesLeft,
     liveEntryOrderType: sanitizeMarketOrderType(c.liveEntryOrderType ?? base.liveEntryOrderType),
     liveExitOrderType: sanitizeMarketOrderType(c.liveExitOrderType ?? base.liveExitOrderType),
@@ -260,6 +269,14 @@ export const CONFIG = {
     minModelProb: Math.max(
       0,
       Number(process.env.STRATEGY_MIN_MODEL_PROB) || DEFAULTS.strategy.minModelProb
+    ),
+    minBookImbalance: Math.max(
+      0,
+      Number(process.env.STRATEGY_MIN_BOOK_IMBALANCE) || DEFAULTS.strategy.minBookImbalance
+    ),
+    maxSpreadToEdgeRatio: Math.max(
+      0,
+      Number(process.env.STRATEGY_MAX_SPREAD_TO_EDGE_RATIO) || DEFAULTS.strategy.maxSpreadToEdgeRatio
     )
   },
 
@@ -306,6 +323,8 @@ const baseVariant = {
   forceExitMinutesLeft: CONFIG.strategy.forceExitMinutesLeft,
   minEdge: CONFIG.strategy.minEdge,
   minModelProb: CONFIG.strategy.minModelProb,
+  minBookImbalance: CONFIG.strategy.minBookImbalance,
+  maxSpreadToEdgeRatio: CONFIG.strategy.maxSpreadToEdgeRatio,
   entryCloseMinutesLeft: null,
   liveEntryOrderType: "FOK",
   liveExitOrderType: "FOK",

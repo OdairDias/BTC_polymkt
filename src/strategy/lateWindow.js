@@ -12,6 +12,10 @@ export function decideLateWindowSide({
   downMid,
   upBuy,
   downBuy,
+  upBookImbalance,
+  downBookImbalance,
+  upSpread,
+  downSpread,
   modelUp,
   modelDown,
   marketUp,
@@ -20,6 +24,8 @@ export function decideLateWindowSide({
   minEntryPrice,
   minEdge,
   minModelProb,
+  minBookImbalance,
+  maxSpreadToEdgeRatio,
   epsilon,
   ptbDelta,
   rsiNow,
@@ -87,8 +93,18 @@ export function decideLateWindowSide({
 
     const selectedModelProbRaw = chosenSide === "UP" ? modelUp : modelDown;
     const selectedMarketProbRaw = chosenSide === "UP" ? marketUp : marketDown;
+    const selectedBookImbalanceRaw = chosenSide === "UP" ? upBookImbalance : downBookImbalance;
+    const selectedSpreadRaw = chosenSide === "UP" ? upSpread : downSpread;
     const selectedModelProb = Number.isFinite(Number(selectedModelProbRaw)) ? Number(selectedModelProbRaw) : null;
     const selectedMarketProb = Number.isFinite(Number(selectedMarketProbRaw)) ? Number(selectedMarketProbRaw) : null;
+    const selectedBookImbalance =
+      Number.isFinite(Number(selectedBookImbalanceRaw)) && Number(selectedBookImbalanceRaw) > 0
+        ? Number(selectedBookImbalanceRaw)
+        : null;
+    const selectedSpread =
+      Number.isFinite(Number(selectedSpreadRaw)) && Number(selectedSpreadRaw) >= 0
+        ? Number(selectedSpreadRaw)
+        : null;
     const selectedEdge =
       selectedModelProb !== null && selectedMarketProb !== null
         ? selectedModelProb - selectedMarketProb
@@ -112,6 +128,31 @@ export function decideLateWindowSide({
       }
     }
 
+    const requiredBookImbalance = Number(minBookImbalance);
+    const bookImbalanceGateEnabled = Number.isFinite(requiredBookImbalance) && requiredBookImbalance > 0;
+    if (bookImbalanceGateEnabled) {
+      if (selectedBookImbalance === null) {
+        return { inWindow: true, result: "SKIP_BOOK_IMBALANCE_UNAVAILABLE", side: null, upMid, downMid };
+      }
+      if (selectedBookImbalance < requiredBookImbalance) {
+        return { inWindow: true, result: "SKIP_BOOK_IMBALANCE_TOO_LOW", side: null, upMid, downMid };
+      }
+    }
+
+    const spreadToEdgeRatio = Number(maxSpreadToEdgeRatio);
+    const spreadVsEdgeGateEnabled = Number.isFinite(spreadToEdgeRatio) && spreadToEdgeRatio > 0;
+    if (spreadVsEdgeGateEnabled) {
+      if (selectedSpread === null) {
+        return { inWindow: true, result: "SKIP_SPREAD_UNAVAILABLE", side: null, upMid, downMid };
+      }
+      if (selectedEdge === null || selectedEdge <= 0) {
+        return { inWindow: true, result: "SKIP_SPREAD_EDGE_UNAVAILABLE", side: null, upMid, downMid };
+      }
+      if (selectedSpread >= spreadToEdgeRatio * selectedEdge) {
+        return { inWindow: true, result: "SKIP_SPREAD_TOO_WIDE_FOR_EDGE", side: null, upMid, downMid };
+      }
+    }
+
     return {
       inWindow: true,
       result: chosenSide,
@@ -120,7 +161,9 @@ export function decideLateWindowSide({
       downMid,
       selectedModelProb,
       selectedMarketProb,
-      selectedEdge
+      selectedEdge,
+      selectedBookImbalance,
+      selectedSpread
     };
   }
 
