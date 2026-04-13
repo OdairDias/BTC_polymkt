@@ -288,6 +288,20 @@ JSON output:
 npm run walkforward:strategy -- --days=45 --strategy=cheap_15m_tp35 --json
 ```
 
+## Offline training (baseline)
+
+Train a logistic baseline using the feature store from `strategy_paper_signals` + `strategy_paper_outcomes`.
+
+```bash
+npm run train:model -- --days=60 --strategy=cheap_15m_tp35
+```
+
+JSON output:
+
+```bash
+npm run train:model -- --days=90 --strategy=cheap_15m_tp35 --json
+```
+
 ## Safety
 
 This is not financial advice. Use at your own risk.

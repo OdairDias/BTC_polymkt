@@ -62,7 +62,7 @@ Dados (book, oracle, Binance, meta do mercado)
 
 ### Marco 0 — Instrumentação (Feature Store e Data Science)
 
-**Status:** `parcialmente concluído` (colunas de sinais/outcomes e features críticas já persistidas; treino offline ainda pendente).
+**Status:** `concluído` (colunas de sinais/outcomes persistidas + treino offline baseline em `scripts/train-probability-model.mjs`).
 
 **Objetivo**: Transformar o banco de dados em uma base de treinamento para modelos estatísticos.
 
