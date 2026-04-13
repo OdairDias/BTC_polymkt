@@ -7,6 +7,9 @@
 - `minModelProb` reduzido de `0.56` para `0.54` na variante `cheap_15m_tp35`.
 - Motivo: os logs apos o ultimo deploy mostraram ausencia de erro operacional, mas excesso de
   `SKIP_MODEL_PROB_TOO_LOW`, indicando filtro de conviccao conservador demais para a janela atual.
+- `targetEntryPrice` / `maxEntryPrice` aumentados de `0.35` para `0.37`.
+- Motivo: entradas historicas permitidas estavam concentradas no limite de `0.35`, enquanto o
+  bloco `SKIP_CHEAP_TOO_EXPENSIVE` permaneceu alto nas ultimas janelas.
 
 ### Robustez do fallback por `seriesSlug`
 

@@ -15,7 +15,7 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 - Mercado: BTC `15m`
 - Inicio da janela de entrada: `entryMinutesLeft=13.75` (cerca de 1m15s depois da abertura)
 - Fim da janela de entrada: `entryCloseMinutesLeft=5.0`
-- Compra maxima: `targetEntryPrice=0.35`
+- Compra maxima: `targetEntryPrice=0.37`
 - Piso de compra: `minEntryPrice=0.05`
 - Saida no lucro: `takeProfitPrice=0.45`
 - Trava de lucro bruto: `grossProfitTargetUsd=0.22`
@@ -38,7 +38,7 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 3. Em cada tick dentro dessa janela, compara os dois lados (`UP` e `DOWN`).
 4. Escolhe o lado mais barato.
 5. So entra se esse lado estiver barato, mas ainda "vivo":
-   - nao pode estar acima de `0.35`
+   - nao pode estar acima de `0.37`
    - nao pode estar abaixo de `0.05`
    - edge modelado do lado escolhido precisa ser >= `0.04`
   - probabilidade modelada do lado escolhido precisa ser >= `0.54`
@@ -87,7 +87,7 @@ Os logs mostram qual caminho foi usado:
   - abre a janela de entrada cedo, mas nao no primeiro segundo
 - `entryCloseMinutesLeft=5.0`
   - permite novas entradas ate faltarem `5` minutos para o fechamento
-- `targetEntryPrice=0.35`
+- `targetEntryPrice=0.37`
   - se o lado barato estiver acima disso, a estrategia faz skip (`SKIP_CHEAP_TOO_EXPENSIVE`)
 - `minEntryPrice=0.05`
   - evita entrar em um lado que ja pode estar esmagado demais (`SKIP_CHEAP_TOO_CHEAP`)
