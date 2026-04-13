@@ -6,6 +6,7 @@ import { getOrCreateClobClient, isRelayerBuilderConfigured } from "./liveClob.js
 const LIVE_DEBUG = process.env.STRATEGY_LIVE_DEBUG === "true";
 const ERR_MSG_MAX = 8000;
 const CONDITIONAL_TOKEN_DECIMALS = 6;
+const MARKETABLE_BUY_MIN_USD = 1.0;
 
 function normalizeMarketOrderType(orderType, fallback = OrderType.FOK) {
   return orderType === OrderType.FAK || orderType === "FAK" ? OrderType.FAK : fallback;
@@ -416,7 +417,13 @@ export async function tryPlaceSniperFokOrder({
       throw new Error("limitPrice ou notionalUsd invalidos para CLOB");
     }
 
-    const { capPrice: requestedCap, amountUsd } = capPriceAndAmountUsd(price0, notional, tickSize);
+    const { capPrice: requestedCap, amountUsd: requestedAmountUsd } = capPriceAndAmountUsd(price0, notional, tickSize);
+    const amountUsd = Number(
+      roundDownDecimals(Math.max(requestedAmountUsd, MARKETABLE_BUY_MIN_USD), 2).toFixed(2)
+    );
+    const minAmountApplied = amountUsd > requestedAmountUsd + 1e-9;
+
+    rowBase.notional_usd = amountUsd;
     const executionWindow = await prepareImmediateBuyExecution({
       clob,
       tokenId,
@@ -455,6 +462,7 @@ export async function tryPlaceSniperFokOrder({
     const ctxLog = {
       market_slug: marketSlug,
       amountUsd,
+      requestedAmountUsd,
       capPrice,
       requestedCap,
       bestAsk: executionWindow.bestAsk,
@@ -503,9 +511,10 @@ export async function tryPlaceSniperFokOrder({
 
     return {
       ok: true,
-      line: `CLOB ${effectiveOrderType} ok | price ${capPrice} | amt $${amountUsd} | shares ${trackedShares.toFixed(2)} | order ${orderId ?? "(sem id)"}${statusHint}`,
+      line: `CLOB ${effectiveOrderType} ok | price ${capPrice} | amt $${amountUsd}${minAmountApplied ? ` (floor from $${requestedAmountUsd})` : ""} | shares ${trackedShares.toFixed(2)} | order ${orderId ?? "(sem id)"}${statusHint}`,
       sizeShares: trackedShares,
-      filledPrice: capPrice
+      filledPrice: capPrice,
+      notionalUsd: amountUsd
     };
   } catch (err) {
     const explained = explainClobFailure(err);

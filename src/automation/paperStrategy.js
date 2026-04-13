@@ -994,7 +994,7 @@ export async function runPaperStrategyTick({
                 tokenId: sniperState.tokenId,
                 targetPrice: takeProfit.price,
                 sizeShares: Number(liveEntry.sizeShares ?? touchedShares),
-                notionalUsd: sniperState.notionalUsd,
+                notionalUsd: Number(liveEntry.notionalUsd ?? sniperState.notionalUsd),
                 entryId: sniperState.entryId,
                 entryPrice: Number(liveEntry.filledPrice ?? touchedEntryPrice),
                 forceExitMinutesLeft: takeProfit.forceExitMinutesLeft
