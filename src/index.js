@@ -8,7 +8,7 @@ import { startChainlinkPriceStream } from "./data/chainlinkWs.js";
 import { startPolymarketChainlinkPriceStream } from "./data/polymarketLiveWs.js";
 import {
   fetchMarketBySlug,
-  fetchMarketsBySeriesSlug,
+  fetchSeriesBySlug,
   fetchLiveEventsBySeriesId,
   flattenEventMarkets,
   pickLatestLiveMarket,
@@ -492,8 +492,12 @@ async function resolveCurrentBtcMarket(marketConfig = {}) {
   if (!picked && config.autoSelectLatest && config.seriesSlug && config.seriesSlug !== CONFIG.polymarket.seriesSlug) {
     console.error(`[market] fallback seriesSlug=${config.seriesSlug}`);
     try {
-      const markets = await fetchMarketsBySeriesSlug({ seriesSlug: config.seriesSlug, limit: 25 });
-      picked = pickLatestLiveMarket(markets);
+      const series = await fetchSeriesBySlug(config.seriesSlug);
+      const seriesEvents = Array.isArray(series?.events) ? series.events : [];
+      const pickedEvent = pickLatestLiveMarket(seriesEvents);
+      if (pickedEvent?.slug) {
+        picked = await fetchMarketBySlug(pickedEvent.slug);
+      }
       if (picked) console.error(`[market] resolved via seriesSlug=${config.seriesSlug}: ${picked.slug}`);
     } catch (err) {
       console.error(`[market] seriesSlug fallback error: ${err?.message ?? err}`);

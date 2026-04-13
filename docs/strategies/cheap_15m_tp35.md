@@ -20,7 +20,7 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
 - Saida no lucro: `takeProfitPrice=0.45`
 - Trava de lucro bruto: `grossProfitTargetUsd=0.22`
 - Filtro de edge: `minEdge=0.04`
-- Filtro de probabilidade: `minModelProb=0.56`
+- Filtro de probabilidade: `minModelProb=0.54`
 - Filtro de microestrutura (book): `minBookImbalance=0.80`
 - Filtro de custo de execução: `maxSpreadToEdgeRatio=0.50`
 - Paper fill conservador: `paperFillMode=pessimistic`
@@ -41,7 +41,7 @@ Capturar uma reprecificacao curta no meio da janela, em vez de depender apenas d
    - nao pode estar acima de `0.35`
    - nao pode estar abaixo de `0.05`
    - edge modelado do lado escolhido precisa ser >= `0.04`
-   - probabilidade modelada do lado escolhido precisa ser >= `0.56`
+  - probabilidade modelada do lado escolhido precisa ser >= `0.54`
    - book imbalance do lado escolhido precisa ser >= `0.80` (bid/ask de liquidez)
    - spread do lado escolhido precisa ser menor que `0.50 * edge` (evita pagar friccao demais)
 6. No live, a entrada FAK faz um preflight no book e pode virar `skip` se nao houver asks/lote suficiente ate o preco aceito naquele instante.
@@ -99,7 +99,7 @@ Os logs mostram qual caminho foi usado:
   - realiza lucro mais cedo quando o valor vendavel da posicao ja estiver acima do custo em pelo menos `$0.22`
 - `minEdge=0.04`
   - exige distorcao minima entre probabilidade modelada e probabilidade implicita de mercado
-- `minModelProb=0.56`
+- `minModelProb=0.54`
   - evita entrada quando o proprio modelo nao esta convicto o suficiente
 - `forceExitMinutesLeft=2.5`
   - saida por tempo quando faltam 2.5 min, evita carregar ate o fim
@@ -113,6 +113,8 @@ Os logs mostram qual caminho foi usado:
   - evita abrir novas posicoes quando os dados chegam velhos (stale)
 - `sizingMode=kelly`, `kellyFraction=0.35`, `kellyMinNotionalUsd=0.70`, `kellyMaxNotionalUsd=1.00`
   - ajusta o notional por confianca/edge sem passar de `$1.00` por entrada
+- no live, compra marketable respeita piso operacional de `$1.00`
+  - isso evita rejeicao do CLOB quando o Kelly sugerir algo abaixo do minimo aceito
 - `maxDailyLossUsd=2.0`, `riskDayTimezone=America/Sao_Paulo`
   - pausa novas entradas no dia quando a perda acumulada bate o limite
 

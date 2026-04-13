@@ -97,6 +97,21 @@ export async function fetchMarketBySlug(slug) {
   return market;
 }
 
+export async function fetchSeriesBySlug(seriesSlug) {
+  const url = new URL("/series", CONFIG.gammaBaseUrl);
+  url.searchParams.set("slug", seriesSlug);
+
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Gamma series error: ${res.status} ${await res.text()}`);
+  }
+
+  const data = await res.json();
+  const series = Array.isArray(data) ? data[0] : data;
+  if (!series) return null;
+  return series;
+}
+
 export function extractResolvedOutcomeFromMarket(market, { minWinnerPrice = 0.99 } = {}) {
   const outcomes = parseJsonArray(market?.outcomes).map((x) => String(x));
   const outcomePrices = parseJsonArray(market?.outcomePrices).map((x) => toNumber(x));

@@ -90,7 +90,7 @@ export const STRATEGY_VARIANTS = [
     takeProfitPrice: 0.45,
     grossProfitTargetUsd: 0.22,
     minEdge: 0.04,
-    minModelProb: 0.56,
+    minModelProb: 0.54,
     minBookImbalance: 0.8,
     maxSpreadToEdgeRatio: 0.5,
     paperFillMode: "pessimistic",

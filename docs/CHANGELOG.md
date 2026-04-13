@@ -1,5 +1,22 @@
 # Changelog
 
+## [ajuste-strategia] - 2026-04-13
+
+### Ajuste fino da `cheap_15m_tp35`
+
+- `minModelProb` reduzido de `0.56` para `0.54` na variante `cheap_15m_tp35`.
+- Motivo: os logs apos o ultimo deploy mostraram ausencia de erro operacional, mas excesso de
+  `SKIP_MODEL_PROB_TOO_LOW`, indicando filtro de conviccao conservador demais para a janela atual.
+
+### Robustez do fallback por `seriesSlug`
+
+- O fallback de mercado por `seriesSlug` foi alterado para consultar o endpoint `/series?slug=...`
+  e, a partir dele, resolver o evento/mercado ativo por slug.
+- Motivo: a Gamma nem sempre respeita o filtro `seriesSlug` no endpoint `/markets`, o que deixa
+  o fallback atual vulneravel para series fora do padrao de slug recorrente por timestamp.
+- Impacto pratico: isso melhora a seguranca do fallback do `15m` e abre caminho tecnico mais
+  confiavel para avaliar a serie `btc-up-or-down-hourly`.
+
 ## [ajuste-strategia] — 2026-04-09
 
 ### Diagnostico da sessao
