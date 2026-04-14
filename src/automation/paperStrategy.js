@@ -1220,7 +1220,25 @@ export async function runPaperStrategyTick({
         // Em monitoramento contínuo, se não gerou entrada (ex: SKIP_TOO_EXPENSIVE), não registramos no DB.
         // Apenas atualizamos a linha do console para mostrar que estamos aguardando o preço.
         localLiveLine = localLiveLine || null; // mantem asymetria/warnings
-        localPaperLine = `${ANSI_GRAY}${tag} MONITOR (${variant.decisionMode}): aguardando opp (${effectiveDecision.result})${ANSI_RESET}`;
+        const upBuyN = Number(upBuy);
+        const downBuyN = Number(downBuy);
+        const cheapObserved =
+          Number.isFinite(upBuyN) && Number.isFinite(downBuyN)
+            ? Math.min(upBuyN, downBuyN)
+            : null;
+        const monitorDetails = [
+          cheapObserved != null ? `cheap=${cheapObserved.toFixed(2)}` : null,
+          Number.isFinite(Number(effectiveDecision?.selectedModelProb))
+            ? `model=${Number(effectiveDecision.selectedModelProb).toFixed(3)}`
+            : null,
+          Number.isFinite(Number(effectiveDecision?.selectedEdge))
+            ? `edge=${Number(effectiveDecision.selectedEdge).toFixed(3)}`
+            : null
+        ].filter(Boolean).join(" | ");
+        const reasonText = monitorDetails
+          ? `${effectiveDecision.result}; ${monitorDetails}`
+          : effectiveDecision.result;
+        localPaperLine = `${ANSI_GRAY}${tag} MONITOR (${variant.decisionMode}): aguardando opp (${reasonText})${ANSI_RESET}`;
         sniperStateByStrategy.set(key, sniperState);
         paperTakeProfitStateByStrategy.set(key, paperTakeProfitState);
         liveTakeProfitStateByStrategy.set(key, liveTakeProfitState);
