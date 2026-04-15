@@ -444,6 +444,8 @@ function evaluateDataHealthGuard({ variant, dataHealth }) {
 }
 
 function toFiniteNumber(value) {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "string" && value.trim() === "") return null;
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -634,6 +636,7 @@ export async function runPaperStrategyTick({
               })
               : null;
             const grossProfitTargetUsd = toFiniteNumber(takeProfit.grossProfitTargetUsd);
+            const grossProfitEnabled = grossProfitTargetUsd != null && grossProfitTargetUsd > 0;
             const forceExitMinutesLeft = toFiniteNumber(paperTakeProfitState.forceExitMinutesLeft);
             const grossExit = computeGrossExitSnapshot({
               bidPrice: executableBidPrice,
@@ -686,7 +689,7 @@ export async function runPaperStrategyTick({
             } else if (targetPrice != null && bidPrice != null && bidPrice >= targetPrice && !hasLiquidity) {
               localPaperLine = `${ANSI_GRAY}${tag} TP aguardando liquidez @ ${targetPrice.toFixed(2)}${ANSI_RESET}`;
             } else if (
-              grossProfitTargetUsd != null &&
+              grossProfitEnabled &&
               grossExit.grossProfitUsd != null &&
               grossExit.grossProfitUsd >= grossProfitTargetUsd &&
               bidPrice != null &&
@@ -729,7 +732,7 @@ export async function runPaperStrategyTick({
               localPaperLine = `${ANSI_GREEN}${tag} GROSS PROFIT ${paperTakeProfitState.side} @${executableBidPrice.toFixed(3)} (gross +$${grossExit.grossProfitUsd.toFixed(2)})${ANSI_RESET}`;
               clearTakeProfitState(paperTakeProfitState);
             } else if (
-              grossProfitTargetUsd != null &&
+              grossProfitEnabled &&
               grossExit.grossProfitUsd != null &&
               grossExit.grossProfitUsd >= grossProfitTargetUsd &&
               executableBidPrice != null &&
@@ -790,6 +793,7 @@ export async function runPaperStrategyTick({
             const bidPrice = toFiniteNumber(sideBestBid(poly, liveTakeProfitState.side));
             const targetPrice = toFiniteNumber(liveTakeProfitState.targetPrice);
             const grossProfitTargetUsd = toFiniteNumber(takeProfit.grossProfitTargetUsd);
+            const grossProfitEnabled = grossProfitTargetUsd != null && grossProfitTargetUsd > 0;
             const forceExitMinutesLeft = toFiniteNumber(liveTakeProfitState.forceExitMinutesLeft);
             let effectiveExitShares = toFiniteNumber(liveTakeProfitState.sizeShares);
             if (liveTakeProfitState.tokenId != null) {
@@ -823,7 +827,7 @@ export async function runPaperStrategyTick({
               Number(settlementLeftMin) <= forceExitMinutesLeft;
             const targetText = targetPrice != null ? `TP >= ${targetPrice.toFixed(2)}` : "sem TP";
             const grossProfitText =
-              grossProfitTargetUsd != null ? ` | gross >= $${grossProfitTargetUsd.toFixed(2)}` : "";
+              grossProfitEnabled ? ` | gross >= $${grossProfitTargetUsd.toFixed(2)}` : "";
             const timeStopText = forceExitMinutesLeft != null ? ` | stop ${forceExitMinutesLeft.toFixed(2)}m` : "";
             localLiveLine = `${ANSI_YELLOW}EXIT monitor ${liveTakeProfitState.side} | ${targetText}${grossProfitText}${timeStopText} (bid ${bidPrice != null ? bidPrice.toFixed(3) : "-"})${ANSI_RESET}`;
 
@@ -851,7 +855,7 @@ export async function runPaperStrategyTick({
             } else if (targetPrice != null && bidPrice != null && bidPrice >= targetPrice && !hasLiquidity) {
               localLiveLine = `${ANSI_GRAY}TP tocou preco, mas sem liquidez suficiente no bid${ANSI_RESET}`;
             } else if (
-              grossProfitTargetUsd != null &&
+              grossProfitEnabled &&
               grossExit.grossProfitUsd != null &&
               grossExit.grossProfitUsd >= grossProfitTargetUsd &&
               bidPrice != null &&
@@ -878,7 +882,7 @@ export async function runPaperStrategyTick({
                 localLiveLine = `${ANSI_RED}GROSS PROFIT LIVE ERRO: ${err.message}${ANSI_RESET}`;
               }
             } else if (
-              grossProfitTargetUsd != null &&
+              grossProfitEnabled &&
               grossExit.grossProfitUsd != null &&
               grossExit.grossProfitUsd >= grossProfitTargetUsd &&
               bidPrice != null &&
@@ -1417,7 +1421,7 @@ export async function runPaperStrategyTick({
               tokenId,
               targetPrice: takeProfit.price,
               sizeShares: Number(liveEntry.sizeShares ?? simulatedShares),
-              notionalUsd: activeNotionalUsd,
+              notionalUsd: Number(liveEntry.notionalUsd ?? activeNotionalUsd),
               entryId: signalId,
               entryPrice: Number(liveEntry.filledPrice ?? entryPrice),
               forceExitMinutesLeft: takeProfit.forceExitMinutesLeft
