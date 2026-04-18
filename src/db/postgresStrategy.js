@@ -80,12 +80,23 @@ export async function ensureStrategySchema(client) {
       entry_correct BOOLEAN,
       pnl_simulated_usd NUMERIC,
       dry_run BOOLEAN NOT NULL DEFAULT true,
-      UNIQUE(entry_id)
+      exit_price NUMERIC,
+      exit_reason TEXT,
+      exited_early BOOLEAN NOT NULL DEFAULT false,
+      exit_sequence INTEGER NOT NULL DEFAULT 1,
+      fraction_exited NUMERIC,
+      shares_exited NUMERIC,
+      notional_exited_usd NUMERIC,
+      remaining_shares NUMERIC,
+      remaining_notional_usd NUMERIC,
+      is_final_exit BOOLEAN NOT NULL DEFAULT true
     );
     CREATE INDEX IF NOT EXISTS idx_strategy_paper_outcomes_slug
       ON strategy_paper_outcomes (market_slug);
     CREATE INDEX IF NOT EXISTS idx_strategy_paper_outcomes_created
       ON strategy_paper_outcomes (created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_strategy_paper_outcomes_entry_sequence
+      ON strategy_paper_outcomes (entry_id, exit_sequence);
 
     CREATE TABLE IF NOT EXISTS strategy_live_orders (
       id BIGSERIAL PRIMARY KEY,
@@ -122,6 +133,10 @@ export async function ensureStrategySchema(client) {
       clob_order_id TEXT,
       status TEXT NOT NULL,
       exit_reason TEXT,
+      exit_sequence INTEGER NOT NULL DEFAULT 1,
+      fraction_exited NUMERIC,
+      remaining_shares NUMERIC,
+      is_final_exit BOOLEAN NOT NULL DEFAULT true,
       error_message TEXT,
       raw_response JSONB
     );
@@ -150,8 +165,16 @@ export async function ensureStrategySchema(client) {
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_model_prob NUMERIC;
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_market_prob NUMERIC;
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_edge NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_base_edge NUMERIC;
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS book_imbalance NUMERIC;
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS selected_spread NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS binary_sum_mids NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS binary_discount NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS oracle_lag_bonus NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS cross_market_consistency NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS cross_market_divergence NUMERIC;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS regime_detected TEXT;
+    ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS vol_atr_base_minutes NUMERIC;
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS entry_reason_code TEXT;
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS entry_context_json JSONB;
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS config_hash TEXT;
@@ -165,9 +188,23 @@ export async function ensureStrategySchema(client) {
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS exit_price NUMERIC;
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS exit_reason TEXT;
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS exited_early BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS exit_sequence INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS fraction_exited NUMERIC;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS shares_exited NUMERIC;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS notional_exited_usd NUMERIC;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS remaining_shares NUMERIC;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS remaining_notional_usd NUMERIC;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS is_final_exit BOOLEAN NOT NULL DEFAULT true;
+    ALTER TABLE strategy_live_exits ADD COLUMN IF NOT EXISTS exit_sequence INTEGER NOT NULL DEFAULT 1;
+    ALTER TABLE strategy_live_exits ADD COLUMN IF NOT EXISTS fraction_exited NUMERIC;
+    ALTER TABLE strategy_live_exits ADD COLUMN IF NOT EXISTS remaining_shares NUMERIC;
+    ALTER TABLE strategy_live_exits ADD COLUMN IF NOT EXISTS is_final_exit BOOLEAN NOT NULL DEFAULT true;
+    ALTER TABLE strategy_paper_outcomes DROP CONSTRAINT IF EXISTS strategy_paper_outcomes_entry_id_key;
     ALTER TABLE strategy_paper_signals DROP CONSTRAINT IF EXISTS strategy_paper_signals_market_slug_key;
     CREATE UNIQUE INDEX IF NOT EXISTS uq_strategy_paper_signals_strategy_slug
       ON strategy_paper_signals(strategy_key, market_slug);
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_strategy_paper_outcomes_entry_sequence
+      ON strategy_paper_outcomes(entry_id, exit_sequence);
   `);
 }
 
@@ -198,27 +235,45 @@ export async function fetchOutcomeRiskStats(client, { strategyKey = "default", r
   const key = String(strategyKey || "default");
 
   const rollingRes = await client.query(
-    `SELECT COALESCE(SUM(pnl_simulated_usd), 0)::float8 AS rolling_pnl
-     FROM strategy_paper_outcomes
-     WHERE entry_correct IS NOT NULL
-       AND strategy_key = $2
-       AND created_at >= NOW() - ($1::text || ' hours')::interval`,
+    `WITH entry_rollup AS (
+       SELECT
+         entry_id,
+         strategy_key,
+         MAX(created_at) AS last_outcome_at,
+         COALESCE(SUM(pnl_simulated_usd), 0)::float8 AS total_pnl
+       FROM strategy_paper_outcomes
+       WHERE entry_correct IS NOT NULL
+         AND strategy_key = $2
+       GROUP BY entry_id, strategy_key
+     )
+     SELECT COALESCE(SUM(total_pnl), 0)::float8 AS rolling_pnl
+     FROM entry_rollup
+     WHERE last_outcome_at >= NOW() - ($1::text || ' hours')::interval`,
     [String(safeRollingHours), key]
   );
 
   const streakRes = await client.query(
-    `SELECT entry_correct
-     FROM strategy_paper_outcomes
-     WHERE entry_correct IS NOT NULL
-       AND strategy_key = $2
-     ORDER BY created_at DESC
+    `WITH entry_rollup AS (
+       SELECT
+         entry_id,
+         strategy_key,
+         MAX(created_at) AS last_outcome_at,
+         COALESCE(SUM(pnl_simulated_usd), 0)::float8 AS total_pnl
+       FROM strategy_paper_outcomes
+       WHERE entry_correct IS NOT NULL
+         AND strategy_key = $2
+       GROUP BY entry_id, strategy_key
+     )
+     SELECT total_pnl
+     FROM entry_rollup
+     ORDER BY last_outcome_at DESC
      LIMIT $1`,
     [safeSample, key]
   );
 
   let consecutiveLosses = 0;
   for (const row of streakRes.rows) {
-    if (row.entry_correct === false) {
+    if (Number(row.total_pnl) < 0) {
       consecutiveLosses += 1;
       continue;
     }
@@ -242,18 +297,27 @@ export async function fetchDailyRiskStats(
     `WITH day_bounds AS (
        SELECT
          (date_trunc('day', NOW() AT TIME ZONE $2) AT TIME ZONE $2) AS day_start_utc
+     ),
+     entry_rollup AS (
+       SELECT
+         o.entry_id,
+         o.strategy_key,
+         MAX(o.created_at) AS last_trade_at,
+         COALESCE(SUM(o.pnl_simulated_usd), 0)::float8 AS total_pnl
+       FROM strategy_paper_outcomes o
+       WHERE o.entry_correct IS NOT NULL
+         AND o.strategy_key = $1
+       GROUP BY o.entry_id, o.strategy_key
      )
      SELECT
-       COALESCE(SUM(o.pnl_simulated_usd), 0)::float8 AS daily_pnl,
+       COALESCE(SUM(e.total_pnl), 0)::float8 AS daily_pnl,
        COUNT(*)::int AS daily_trades,
-       MIN(o.created_at) AS first_trade_at,
-       MAX(o.created_at) AS last_trade_at
-     FROM strategy_paper_outcomes o
+       MIN(e.last_trade_at) AS first_trade_at,
+       MAX(e.last_trade_at) AS last_trade_at
+     FROM entry_rollup e
      CROSS JOIN day_bounds d
-     WHERE o.entry_correct IS NOT NULL
-       AND o.strategy_key = $1
-       AND o.created_at >= d.day_start_utc
-       AND o.created_at < d.day_start_utc + interval '1 day'`,
+     WHERE e.last_trade_at >= d.day_start_utc
+       AND e.last_trade_at < d.day_start_utc + interval '1 day'`,
     [key, tz]
   );
   return {
@@ -277,10 +341,12 @@ export async function insertPaperSignal(client, row) {
       result_code, chosen_side, notional_usd, entry_price, simulated_shares, dry_run,
       oracle_price, binance_spot_price, price_to_beat, ptb_delta_usd,
       model_prob_up, market_prob_up, edge_up, vol_atr_usd,
-      selected_model_prob, selected_market_prob, selected_edge, book_imbalance, selected_spread,
+      selected_model_prob, selected_market_prob, selected_edge, selected_base_edge, book_imbalance, selected_spread,
+      binary_sum_mids, binary_discount, oracle_lag_bonus, cross_market_consistency, cross_market_divergence,
+      regime_detected, vol_atr_base_minutes,
       entry_reason_code, entry_context_json, config_hash, git_commit
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34::jsonb,$35,$36
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40::jsonb,$41,$42
     )
     ON CONFLICT (strategy_key, market_slug) DO NOTHING
     RETURNING id`,
@@ -315,8 +381,16 @@ export async function insertPaperSignal(client, row) {
       row.selected_model_prob ?? null,
       row.selected_market_prob ?? null,
       row.selected_edge ?? null,
+      row.selected_base_edge ?? null,
       row.book_imbalance ?? null,
       row.selected_spread ?? null,
+      row.binary_sum_mids ?? null,
+      row.binary_discount ?? null,
+      row.oracle_lag_bonus ?? null,
+      row.cross_market_consistency ?? null,
+      row.cross_market_divergence ?? null,
+      row.regime_detected ?? null,
+      row.vol_atr_base_minutes ?? null,
       row.entry_reason_code ?? null,
       row.entry_context_json != null ? JSON.stringify(row.entry_context_json) : null,
       row.config_hash ?? null,
@@ -338,10 +412,12 @@ export async function ensurePaperSignal(client, row) {
       result_code, chosen_side, notional_usd, entry_price, simulated_shares, dry_run,
       oracle_price, binance_spot_price, price_to_beat, ptb_delta_usd,
       model_prob_up, market_prob_up, edge_up, vol_atr_usd,
-      selected_model_prob, selected_market_prob, selected_edge, book_imbalance, selected_spread,
+      selected_model_prob, selected_market_prob, selected_edge, selected_base_edge, book_imbalance, selected_spread,
+      binary_sum_mids, binary_discount, oracle_lag_bonus, cross_market_consistency, cross_market_divergence,
+      regime_detected, vol_atr_base_minutes,
       entry_reason_code, entry_context_json, config_hash, git_commit
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34::jsonb,$35,$36
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40::jsonb,$41,$42
     )
     ON CONFLICT (strategy_key, market_slug) DO UPDATE SET
       condition_id = COALESCE(EXCLUDED.condition_id, strategy_paper_signals.condition_id),
@@ -372,8 +448,16 @@ export async function ensurePaperSignal(client, row) {
       selected_model_prob = COALESCE(EXCLUDED.selected_model_prob, strategy_paper_signals.selected_model_prob),
       selected_market_prob = COALESCE(EXCLUDED.selected_market_prob, strategy_paper_signals.selected_market_prob),
       selected_edge = COALESCE(EXCLUDED.selected_edge, strategy_paper_signals.selected_edge),
+      selected_base_edge = COALESCE(EXCLUDED.selected_base_edge, strategy_paper_signals.selected_base_edge),
       book_imbalance = COALESCE(EXCLUDED.book_imbalance, strategy_paper_signals.book_imbalance),
       selected_spread = COALESCE(EXCLUDED.selected_spread, strategy_paper_signals.selected_spread),
+      binary_sum_mids = COALESCE(EXCLUDED.binary_sum_mids, strategy_paper_signals.binary_sum_mids),
+      binary_discount = COALESCE(EXCLUDED.binary_discount, strategy_paper_signals.binary_discount),
+      oracle_lag_bonus = COALESCE(EXCLUDED.oracle_lag_bonus, strategy_paper_signals.oracle_lag_bonus),
+      cross_market_consistency = COALESCE(EXCLUDED.cross_market_consistency, strategy_paper_signals.cross_market_consistency),
+      cross_market_divergence = COALESCE(EXCLUDED.cross_market_divergence, strategy_paper_signals.cross_market_divergence),
+      regime_detected = COALESCE(EXCLUDED.regime_detected, strategy_paper_signals.regime_detected),
+      vol_atr_base_minutes = COALESCE(EXCLUDED.vol_atr_base_minutes, strategy_paper_signals.vol_atr_base_minutes),
       entry_reason_code = COALESCE(EXCLUDED.entry_reason_code, strategy_paper_signals.entry_reason_code),
       entry_context_json = COALESCE(EXCLUDED.entry_context_json, strategy_paper_signals.entry_context_json),
       config_hash = COALESCE(EXCLUDED.config_hash, strategy_paper_signals.config_hash),
@@ -410,8 +494,16 @@ export async function ensurePaperSignal(client, row) {
       row.selected_model_prob ?? null,
       row.selected_market_prob ?? null,
       row.selected_edge ?? null,
+      row.selected_base_edge ?? null,
       row.book_imbalance ?? null,
       row.selected_spread ?? null,
+      row.binary_sum_mids ?? null,
+      row.binary_discount ?? null,
+      row.oracle_lag_bonus ?? null,
+      row.cross_market_consistency ?? null,
+      row.cross_market_divergence ?? null,
+      row.regime_detected ?? null,
+      row.vol_atr_base_minutes ?? null,
       row.entry_reason_code ?? null,
       row.entry_context_json != null ? JSON.stringify(row.entry_context_json) : null,
       row.config_hash ?? null,
@@ -498,8 +590,9 @@ export async function insertLiveExit(client, row) {
   await client.query(
     `INSERT INTO strategy_live_exits (
       entry_id, strategy_key, market_slug, token_id, side, trigger_price, exit_price,
-      size_shares, notional_usd, clob_order_id, status, exit_reason, error_message, raw_response
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::jsonb)`,
+      size_shares, notional_usd, clob_order_id, status, exit_reason, exit_sequence,
+      fraction_exited, remaining_shares, is_final_exit, error_message, raw_response
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb)`,
     [
       row.entry_id,
       row.strategy_key ?? "default",
@@ -513,6 +606,10 @@ export async function insertLiveExit(client, row) {
       row.clob_order_id ?? null,
       row.status,
       row.exit_reason ?? null,
+      row.exit_sequence ?? 1,
+      row.fraction_exited ?? null,
+      row.remaining_shares ?? null,
+      row.is_final_exit ?? true,
       row.error_message ?? null,
       row.raw_response != null ? JSON.stringify(row.raw_response) : null
     ]
@@ -531,17 +628,33 @@ export async function findPaperEntryBySlug(client, marketSlug) {
 export async function findPendingPaperEntries(client, limit = 20) {
   const safeLimit = Math.max(1, Math.floor(Number(limit) || 20));
   const res = await client.query(
-    `SELECT
+    `WITH outcome_rollup AS (
+       SELECT
+         o.entry_id,
+         COALESCE(SUM(o.shares_exited), 0)::float8 AS exited_shares,
+         COALESCE(SUM(o.notional_exited_usd), 0)::float8 AS exited_notional_usd,
+         BOOL_OR(o.is_final_exit) AS has_final_exit,
+         MAX(o.exit_sequence) AS last_exit_sequence
+       FROM strategy_paper_outcomes o
+       GROUP BY o.entry_id
+     )
+     SELECT
        s.id,
        s.strategy_key,
        s.market_slug,
        s.chosen_side,
        s.entry_price,
        s.notional_usd,
-       s.market_end_at
+       s.simulated_shares,
+       s.market_end_at,
+       COALESCE(r.exited_shares, 0)::float8 AS exited_shares,
+       COALESCE(r.exited_notional_usd, 0)::float8 AS exited_notional_usd,
+       COALESCE(s.simulated_shares, 0)::float8 - COALESCE(r.exited_shares, 0)::float8 AS remaining_shares,
+       COALESCE(s.notional_usd, 0)::float8 - COALESCE(r.exited_notional_usd, 0)::float8 AS remaining_notional_usd,
+       COALESCE(r.last_exit_sequence, 0)::int AS last_exit_sequence
      FROM strategy_paper_signals s
-     LEFT JOIN strategy_paper_outcomes o ON o.entry_id = s.id
-     WHERE o.entry_id IS NULL
+     LEFT JOIN outcome_rollup r ON r.entry_id = s.id
+     WHERE COALESCE(r.has_final_exit, false) = false
        AND s.market_end_at IS NOT NULL
        AND s.market_end_at <= NOW()
        AND s.market_end_at >= NOW() - interval '48 hours'
@@ -554,17 +667,32 @@ export async function findPendingPaperEntries(client, limit = 20) {
 
 export async function findRecoverablePaperTakeProfitEntry(client, { strategyKey = "default", marketSlug }) {
   const res = await client.query(
-    `SELECT
+    `WITH outcome_rollup AS (
+       SELECT
+         o.entry_id,
+         COALESCE(SUM(o.shares_exited), 0)::float8 AS exited_shares,
+         COALESCE(SUM(o.notional_exited_usd), 0)::float8 AS exited_notional_usd,
+         BOOL_OR(o.is_final_exit) AS has_final_exit,
+         MAX(o.exit_sequence) AS last_exit_sequence
+       FROM strategy_paper_outcomes o
+       GROUP BY o.entry_id
+     )
+     SELECT
        s.id,
        s.strategy_key,
        s.market_slug,
        s.chosen_side,
        s.entry_price,
        s.simulated_shares,
-       s.notional_usd
+       s.notional_usd,
+       COALESCE(r.exited_shares, 0)::float8 AS exited_shares,
+       COALESCE(r.exited_notional_usd, 0)::float8 AS exited_notional_usd,
+       COALESCE(s.simulated_shares, 0)::float8 - COALESCE(r.exited_shares, 0)::float8 AS remaining_shares,
+       COALESCE(s.notional_usd, 0)::float8 - COALESCE(r.exited_notional_usd, 0)::float8 AS remaining_notional_usd,
+       COALESCE(r.last_exit_sequence, 0)::int AS last_exit_sequence
      FROM strategy_paper_signals s
-     LEFT JOIN strategy_paper_outcomes o ON o.entry_id = s.id
-     WHERE o.entry_id IS NULL
+     LEFT JOIN outcome_rollup r ON r.entry_id = s.id
+     WHERE COALESCE(r.has_final_exit, false) = false
        AND s.strategy_key = $1
        AND s.market_slug = $2
        AND s.chosen_side IN ('UP', 'DOWN')
@@ -579,7 +707,17 @@ export async function findRecoverablePaperTakeProfitEntry(client, { strategyKey 
 
 export async function findRecoverableLiveTakeProfitEntry(client, { strategyKey = "default", marketSlug }) {
   const res = await client.query(
-    `SELECT
+    `WITH live_exit_rollup AS (
+       SELECT
+         e.entry_id,
+         COALESCE(SUM(CASE WHEN e.status = 'EXECUTED' THEN e.size_shares ELSE 0 END), 0)::float8 AS exited_shares,
+         COALESCE(SUM(CASE WHEN e.status = 'EXECUTED' THEN e.notional_usd ELSE 0 END), 0)::float8 AS exited_notional_usd,
+         BOOL_OR(CASE WHEN e.status = 'EXECUTED' THEN e.is_final_exit ELSE false END) AS has_final_exit,
+         MAX(CASE WHEN e.status = 'EXECUTED' THEN e.exit_sequence ELSE 0 END)::int AS last_exit_sequence
+       FROM strategy_live_exits e
+       GROUP BY e.entry_id
+     )
+     SELECT
        s.id AS entry_id,
        s.strategy_key,
        s.market_slug,
@@ -587,19 +725,20 @@ export async function findRecoverableLiveTakeProfitEntry(client, { strategyKey =
        s.entry_price,
        s.notional_usd,
        l.token_id,
-       l.size_shares
+        l.size_shares,
+        COALESCE(r.exited_shares, 0)::float8 AS exited_shares,
+        COALESCE(r.exited_notional_usd, 0)::float8 AS exited_notional_usd,
+        COALESCE(l.size_shares, 0)::float8 - COALESCE(r.exited_shares, 0)::float8 AS remaining_shares,
+        COALESCE(s.notional_usd, 0)::float8 - COALESCE(r.exited_notional_usd, 0)::float8 AS remaining_notional_usd,
+        COALESCE(r.last_exit_sequence, 0)::int AS last_exit_sequence
      FROM strategy_live_orders l
      JOIN strategy_paper_signals s ON s.id = l.entry_id
+     LEFT JOIN live_exit_rollup r ON r.entry_id = s.id
      WHERE s.strategy_key = $1
        AND s.market_slug = $2
        AND l.side = 'BUY'
        AND l.status = 'SUBMITTED'
-       AND NOT EXISTS (
-         SELECT 1
-         FROM strategy_live_exits e
-         WHERE e.entry_id = s.id
-           AND e.status = 'EXECUTED'
-       )
+       AND COALESCE(r.has_final_exit, false) = false
      ORDER BY l.created_at DESC
      LIMIT 1`,
     [String(strategyKey || "default"), String(marketSlug || "")]
@@ -614,9 +753,11 @@ export async function insertPaperOutcome(client, row) {
       up_mid, down_mid, up_best_bid, up_best_ask, down_best_bid, down_best_ask,
       inferred_winner, official_winner, outcome_code, official_resolution_status, official_resolution_source,
       official_resolved_at, official_outcome_prices_json, official_price_to_beat, official_price_at_close,
-      entry_chosen_side, entry_correct, pnl_simulated_usd, dry_run, exit_price, exit_reason, exited_early
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23,$24,$25,$26,$27)
-    ON CONFLICT (entry_id) DO NOTHING
+      entry_chosen_side, entry_correct, pnl_simulated_usd, dry_run, exit_price, exit_reason, exited_early,
+      exit_sequence, fraction_exited, shares_exited, notional_exited_usd, remaining_shares, remaining_notional_usd,
+      is_final_exit
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34)
+    ON CONFLICT (entry_id, exit_sequence) DO NOTHING
     RETURNING id`,
     [
       row.entry_id,
@@ -645,7 +786,14 @@ export async function insertPaperOutcome(client, row) {
       row.dry_run,
       row.exit_price ?? null,
       row.exit_reason ?? null,
-      row.exited_early ?? false
+      row.exited_early ?? false,
+      row.exit_sequence ?? 1,
+      row.fraction_exited ?? null,
+      row.shares_exited ?? null,
+      row.notional_exited_usd ?? null,
+      row.remaining_shares ?? null,
+      row.remaining_notional_usd ?? null,
+      row.is_final_exit ?? true
     ]
   );
   if (res.rowCount > 0 && res.rows[0]?.id != null) {
@@ -656,16 +804,23 @@ export async function insertPaperOutcome(client, row) {
 
 export async function getStrategyPerformanceReport(client) {
   const res = await client.query(`
+    WITH entry_rollup AS (
+      SELECT
+        strategy_key,
+        entry_id,
+        COALESCE(SUM(pnl_simulated_usd), 0)::float8 AS total_pnl
+      FROM strategy_paper_outcomes
+      WHERE entry_correct IS NOT NULL
+        AND strategy_key != 'default'
+      GROUP BY strategy_key, entry_id
+    )
     SELECT
       strategy_key,
       COUNT(*) as total_entries,
-      SUM(CASE WHEN entry_correct = true THEN 1 ELSE 0 END) as wins,
-      SUM(CASE WHEN entry_correct = false THEN 1 ELSE 0 END) as losses,
-      SUM(COALESCE(pnl_simulated_usd, 0)) as total_pnl
-    FROM strategy_paper_outcomes
-    WHERE entry_correct IS NOT NULL
-      AND evaluation_method IN ('gamma_resolved', 'take_profit_hit', 'time_stop_exit')
-      AND strategy_key != 'default'
+      SUM(CASE WHEN total_pnl > 0 THEN 1 ELSE 0 END) as wins,
+      SUM(CASE WHEN total_pnl < 0 THEN 1 ELSE 0 END) as losses,
+      SUM(total_pnl) as total_pnl
+    FROM entry_rollup
     GROUP BY strategy_key
     ORDER BY total_pnl DESC
   `);

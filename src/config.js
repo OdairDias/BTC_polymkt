@@ -137,6 +137,70 @@ function sanitizeSizingMode(value, fallback = "fixed") {
   return s === "fixed" || s === "kelly" ? s : fallback;
 }
 
+function sanitizeTakeProfitLevels(levels, fallback = [], fallbackPrice = null) {
+  const source = Array.isArray(levels) ? levels : Array.isArray(fallback) ? fallback : [];
+  const cleaned = source
+    .map((level) => {
+      const price = Number(level?.price);
+      const fraction = Number(level?.fraction);
+      if (!Number.isFinite(price) || price <= 0 || price >= 1) return null;
+      if (!Number.isFinite(fraction) || fraction <= 0) return null;
+      return {
+        price: Math.min(0.99, Math.max(0.01, price)),
+        fraction: Math.max(0.0001, fraction)
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.price - b.price);
+
+  if (!cleaned.length) {
+    const price = Number(fallbackPrice);
+    return Number.isFinite(price) && price > 0 && price < 1
+      ? [{ price: Math.min(0.99, Math.max(0.01, price)), fraction: 1 }]
+      : [];
+  }
+
+  const totalFraction = cleaned.reduce((sum, level) => sum + level.fraction, 0);
+  if (!Number.isFinite(totalFraction) || totalFraction <= 0) return [];
+  return cleaned.map((level, index) => ({
+    price: level.price,
+    fraction:
+      index === cleaned.length - 1
+        ? Math.max(0.0001, 1 - cleaned.slice(0, -1).reduce((sum, item) => sum + (item.fraction / totalFraction), 0))
+        : level.fraction / totalFraction
+  }));
+}
+
+function sanitizeEntryPriceTiers(tiers, fallback = []) {
+  const source = Array.isArray(tiers) ? tiers : Array.isArray(fallback) ? fallback : [];
+  return source
+    .map((tier) => {
+      const minutesLeftMin = Number(tier?.minutesLeftMin);
+      const minutesLeftMax = Number(tier?.minutesLeftMax);
+      const maxPrice = Number(tier?.maxPrice);
+      const minEdge = Number(tier?.minEdge);
+      const minModelProb = Number(tier?.minModelProb);
+      const minBookImbalance = Number(tier?.minBookImbalance);
+      return {
+        minutesLeftMin: Number.isFinite(minutesLeftMin) ? minutesLeftMin : null,
+        minutesLeftMax: Number.isFinite(minutesLeftMax) ? minutesLeftMax : null,
+        maxPrice: Number.isFinite(maxPrice) && maxPrice > 0 ? Math.min(0.99, Math.max(0.01, maxPrice)) : null,
+        minEdge: Number.isFinite(minEdge) && minEdge > 0 ? Math.min(0.99, minEdge) : null,
+        minModelProb: Number.isFinite(minModelProb) && minModelProb > 0 ? Math.min(0.99, minModelProb) : null,
+        minBookImbalance:
+          Number.isFinite(minBookImbalance) && minBookImbalance > 0
+            ? Math.max(0.01, minBookImbalance)
+            : null
+      };
+    })
+    .filter((tier) => tier.maxPrice != null || tier.minEdge != null || tier.minModelProb != null || tier.minBookImbalance != null)
+    .sort((a, b) => {
+      const aMax = Number.isFinite(Number(a.minutesLeftMax)) ? Number(a.minutesLeftMax) : Number.POSITIVE_INFINITY;
+      const bMax = Number.isFinite(Number(b.minutesLeftMax)) ? Number(b.minutesLeftMax) : Number.POSITIVE_INFINITY;
+      return bMax - aMax;
+    });
+}
+
 function mergeStrategyVariant(base, candidate) {
   const c = candidate && typeof candidate === "object" ? candidate : {};
   const takeProfitPrice = Number(c.takeProfitPrice ?? base.takeProfitPrice);
@@ -160,6 +224,22 @@ function mergeStrategyVariant(base, candidate) {
   const kellyMinNotionalUsd = Number(c.kellyMinNotionalUsd ?? base.kellyMinNotionalUsd);
   const kellyMaxNotionalUsd = Number(c.kellyMaxNotionalUsd ?? base.kellyMaxNotionalUsd);
   const maxDailyLossUsd = Number(c.maxDailyLossUsd ?? base.maxDailyLossUsd);
+  const maxSumMids = Number(c.maxSumMids ?? base.maxSumMids);
+  const minSumMids = Number(c.minSumMids ?? base.minSumMids);
+  const binaryDiscountBonus = Number(c.binaryDiscountBonus ?? base.binaryDiscountBonus);
+  const regimeTrendEdgeMultiplier = Number(c.regimeTrendEdgeMultiplier ?? base.regimeTrendEdgeMultiplier);
+  const oracleLagBonusMinMs = Number(c.oracleLagBonusMinMs ?? base.oracleLagBonusMinMs);
+  const oracleLagBonusMinDelta = Number(c.oracleLagBonusMinDelta ?? base.oracleLagBonusMinDelta);
+  const oracleLagBonusEdge = Number(c.oracleLagBonusEdge ?? base.oracleLagBonusEdge);
+  const crossMarketWindowMinutes = Number(c.crossMarketWindowMinutes ?? base.crossMarketWindowMinutes);
+  const crossMarketMaxDivergence = Number(c.crossMarketMaxDivergence ?? base.crossMarketMaxDivergence);
+  const crossMarketEdgeBonus = Number(c.crossMarketEdgeBonus ?? base.crossMarketEdgeBonus);
+  const takeProfitLevels = sanitizeTakeProfitLevels(
+    c.takeProfitLevels,
+    base.takeProfitLevels,
+    Number.isFinite(takeProfitPrice) ? takeProfitPrice : base.takeProfitPrice
+  );
+  const entryPriceTiers = sanitizeEntryPriceTiers(c.entryPriceTiers, base.entryPriceTiers);
   return {
     key: sanitizeStrategyVariantKey(c.key, "default"),
     label: String(c.label ?? c.key ?? "default"),
@@ -179,6 +259,17 @@ function mergeStrategyVariant(base, candidate) {
     minEntryPrice: Number.isFinite(minEntryPrice) ? Math.max(0.01, Math.min(0.99, minEntryPrice)) : null,
     takeProfitEnabled: c.takeProfitEnabled === undefined ? Boolean(base.takeProfitEnabled) : Boolean(c.takeProfitEnabled),
     takeProfitPrice: Number.isFinite(takeProfitPrice) ? Math.max(0.01, Math.min(0.99, takeProfitPrice)) : base.takeProfitPrice,
+    takeProfitLevels,
+    trailingStopEnabled:
+      c.trailingStopEnabled === undefined ? Boolean(base.trailingStopEnabled) : Boolean(c.trailingStopEnabled),
+    trailingStopActivationPrice:
+      Number.isFinite(Number(c.trailingStopActivationPrice ?? base.trailingStopActivationPrice))
+        ? Math.max(0.01, Math.min(0.99, Number(c.trailingStopActivationPrice ?? base.trailingStopActivationPrice)))
+        : null,
+    trailingStopDropCents:
+      Number.isFinite(Number(c.trailingStopDropCents ?? base.trailingStopDropCents))
+        ? Math.max(0.001, Math.min(0.99, Number(c.trailingStopDropCents ?? base.trailingStopDropCents)))
+        : null,
     grossProfitTargetUsd: Number.isFinite(grossProfitTargetUsd) && grossProfitTargetUsd > 0 ? Math.max(0.01, grossProfitTargetUsd) : null,
     forceExitMinutesLeft: Number.isFinite(forceExitMinutesLeft) && forceExitMinutesLeft > 0 ? forceExitMinutesLeft : null,
     minEdge: Number.isFinite(minEdge) && minEdge > 0 ? Math.min(0.99, minEdge) : null,
@@ -239,6 +330,39 @@ function mergeStrategyVariant(base, candidate) {
         ? Math.max(0.01, maxDailyLossUsd)
         : 0,
     riskDayTimezone: String(c.riskDayTimezone ?? base.riskDayTimezone ?? "America/Sao_Paulo").trim() || "America/Sao_Paulo",
+    maxSumMids:
+      Number.isFinite(maxSumMids) && maxSumMids > 0
+        ? Math.max(0.01, maxSumMids)
+        : null,
+    minSumMids:
+      Number.isFinite(minSumMids) && minSumMids > 0
+        ? Math.max(0.01, minSumMids)
+        : null,
+    binaryDiscountBonus:
+      Number.isFinite(binaryDiscountBonus) && binaryDiscountBonus >= 0
+        ? Math.max(0, binaryDiscountBonus)
+        : 0,
+    regimeGateEnabled:
+      c.regimeGateEnabled === undefined ? Boolean(base.regimeGateEnabled) : Boolean(c.regimeGateEnabled),
+    regimeTrendEdgeMultiplier:
+      Number.isFinite(regimeTrendEdgeMultiplier) && regimeTrendEdgeMultiplier > 1
+        ? regimeTrendEdgeMultiplier
+        : 1,
+    oracleLagBonusEnabled:
+      c.oracleLagBonusEnabled === undefined ? Boolean(base.oracleLagBonusEnabled) : Boolean(c.oracleLagBonusEnabled),
+    oracleLagBonusMinMs:
+      Number.isFinite(oracleLagBonusMinMs) && oracleLagBonusMinMs > 0
+        ? Math.max(1, Math.floor(oracleLagBonusMinMs))
+        : null,
+    oracleLagBonusMinDelta:
+      Number.isFinite(oracleLagBonusMinDelta) && oracleLagBonusMinDelta > 0
+        ? Math.max(0.1, oracleLagBonusMinDelta)
+        : null,
+    oracleLagBonusEdge:
+      Number.isFinite(oracleLagBonusEdge) && oracleLagBonusEdge > 0
+        ? Math.min(0.99, oracleLagBonusEdge)
+        : 0,
+    entryPriceTiers,
     entryCloseMinutesLeft: Number.isFinite(Number(c.entryCloseMinutesLeft)) ? Number(c.entryCloseMinutesLeft) : base.entryCloseMinutesLeft,
     liveEntryOrderType: sanitizeMarketOrderType(c.liveEntryOrderType ?? base.liveEntryOrderType),
     liveExitOrderType: sanitizeMarketOrderType(c.liveExitOrderType ?? base.liveExitOrderType),
@@ -246,7 +370,23 @@ function mergeStrategyVariant(base, candidate) {
     marketSlugPrefix: String(c.marketSlugPrefix ?? base.marketSlugPrefix ?? "").trim().toLowerCase(),
     marketWindowMinutes: Number.isFinite(marketWindowMinutes) && marketWindowMinutes > 0 ? marketWindowMinutes : null,
     marketSeriesId: String(c.marketSeriesId ?? base.marketSeriesId ?? "").trim(),
-    marketSeriesSlug: String(c.marketSeriesSlug ?? base.marketSeriesSlug ?? "").trim().toLowerCase()
+    marketSeriesSlug: String(c.marketSeriesSlug ?? base.marketSeriesSlug ?? "").trim().toLowerCase(),
+    crossMarketWindowMinutes:
+      Number.isFinite(crossMarketWindowMinutes) && crossMarketWindowMinutes > 0
+        ? crossMarketWindowMinutes
+        : null,
+    crossMarketSeriesId: String(c.crossMarketSeriesId ?? base.crossMarketSeriesId ?? "").trim(),
+    crossMarketSeriesSlug: String(c.crossMarketSeriesSlug ?? base.crossMarketSeriesSlug ?? "").trim().toLowerCase(),
+    crossMarketMaxDivergence:
+      Number.isFinite(crossMarketMaxDivergence) && crossMarketMaxDivergence > 0
+        ? Math.min(1, crossMarketMaxDivergence)
+        : null,
+    crossMarketEdgeBonus:
+      Number.isFinite(crossMarketEdgeBonus) && crossMarketEdgeBonus >= 0
+        ? Math.max(0, crossMarketEdgeBonus)
+        : 0,
+    crossMarketRequired:
+      c.crossMarketRequired === undefined ? Boolean(base.crossMarketRequired) : Boolean(c.crossMarketRequired)
   };
 }
 
@@ -469,12 +609,26 @@ const baseVariant = {
   minEntryPrice: CONFIG.strategy.minEntryPrice,
   takeProfitEnabled: CONFIG.strategy.takeProfitEnabled,
   takeProfitPrice: CONFIG.strategy.takeProfitPrice,
+  takeProfitLevels: [],
+  trailingStopEnabled: false,
+  trailingStopActivationPrice: null,
+  trailingStopDropCents: null,
   grossProfitTargetUsd: CONFIG.strategy.grossProfitTargetUsd,
   forceExitMinutesLeft: CONFIG.strategy.forceExitMinutesLeft,
   minEdge: CONFIG.strategy.minEdge,
   minModelProb: CONFIG.strategy.minModelProb,
   minBookImbalance: CONFIG.strategy.minBookImbalance,
   maxSpreadToEdgeRatio: CONFIG.strategy.maxSpreadToEdgeRatio,
+  maxSumMids: null,
+  minSumMids: null,
+  binaryDiscountBonus: 0,
+  regimeGateEnabled: false,
+  regimeTrendEdgeMultiplier: 1,
+  oracleLagBonusEnabled: false,
+  oracleLagBonusMinMs: null,
+  oracleLagBonusMinDelta: null,
+  oracleLagBonusEdge: 0,
+  entryPriceTiers: [],
   paperFillMode: CONFIG.strategy.paperFillMode,
   paperEntrySlippageBps: CONFIG.strategy.paperEntrySlippageBps,
   paperExitSlippageBps: CONFIG.strategy.paperExitSlippageBps,
@@ -497,7 +651,13 @@ const baseVariant = {
   marketSlugPrefix: "",
   marketWindowMinutes: null,
   marketSeriesId: "",
-  marketSeriesSlug: ""
+  marketSeriesSlug: "",
+  crossMarketWindowMinutes: null,
+  crossMarketSeriesId: "",
+  crossMarketSeriesSlug: "",
+  crossMarketMaxDivergence: null,
+  crossMarketEdgeBonus: 0,
+  crossMarketRequired: false
 };
 
 // Usa as variantes hardcoded em variants.js como fonte primária.

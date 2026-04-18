@@ -546,6 +546,10 @@ export async function tryPlaceTakeProfitExitOrder({
   notionalUsd,
   exitReason = "TAKE_PROFIT",
   label = "TAKE PROFIT",
+  exitSequence = 1,
+  fractionExited = null,
+  remainingShares = null,
+  isFinalExit = true,
   orderType = OrderType.FOK
 }) {
   const rowBase = {
@@ -558,7 +562,11 @@ export async function tryPlaceTakeProfitExitOrder({
     exit_price: targetPrice,
     size_shares: sizeShares,
     notional_usd: notionalUsd,
-    exit_reason: exitReason
+    exit_reason: exitReason,
+    exit_sequence: exitSequence,
+    fraction_exited: fractionExited,
+    remaining_shares: remainingShares,
+    is_final_exit: isFinalExit
   };
 
   try {

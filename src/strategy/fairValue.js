@@ -9,17 +9,25 @@ function toFiniteNumber(value) {
  * Approximates the probability of UP settling above the strike.
  * Inputs are intentionally simple so we can calibrate later with real data.
  */
-export function estimateOracleProbability({ ptbDelta, volAtr, minutesLeft }) {
+export function estimateOracleProbability({
+  ptbDelta,
+  volAtr,
+  minutesLeft,
+  marketWindowMinutes = null,
+  atrBaseMinutes = null
+}) {
   const delta = toFiniteNumber(ptbDelta);
   const atr = toFiniteNumber(volAtr);
   const mins = toFiniteNumber(minutesLeft);
+  const rawBaseMinutes = toFiniteNumber(atrBaseMinutes) ?? toFiniteNumber(marketWindowMinutes) ?? 5;
+  const baseMinutes = Math.max(1, rawBaseMinutes);
 
   if (delta == null || atr == null || atr <= 0 || mins == null || mins <= 0) {
     return 0.5;
   }
 
-  // Scale expected move by remaining time (5m base because ATR comes from 5m candles).
-  const timeFactor = Math.sqrt(Math.max(0.1, mins / 5));
+  // Scale expected move by the ATR base window that generated volAtr.
+  const timeFactor = Math.sqrt(Math.max(0.1, mins / baseMinutes));
   const expectedMove = atr * timeFactor;
   if (!Number.isFinite(expectedMove) || expectedMove <= 0) {
     return delta > 0 ? 0.99 : 0.01;

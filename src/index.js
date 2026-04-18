@@ -20,11 +20,12 @@ import { computeSessionVwap, computeVwapSeries } from "./indicators/vwap.js";
 import { computeRsi, sma, slopeLast } from "./indicators/rsi.js";
 import { computeMacd } from "./indicators/macd.js";
 import { computeHeikenAshi, countConsecutive } from "./indicators/heikenAshi.js";
-import { computeAtr } from "./indicators/volatility.js";
+import { computeAtr, computeAtrForWindow } from "./indicators/volatility.js";
 import { detectRegime } from "./engines/regime.js";
 import { scoreDirection, applyTimeAwareness } from "./engines/probability.js";
 import { computeEdge, decide } from "./engines/edge.js";
 import { computeFairValue, estimateOracleProbability } from "./strategy/fairValue.js";
+import { midFromBook } from "./strategy/pricing.js";
 import { appendCsvRow, formatNumber, formatPct, getCandleWindowTiming, sleep } from "./utils.js";
 import { startBinanceTradeStream } from "./data/binanceWs.js";
 import fs from "node:fs";
@@ -315,6 +316,43 @@ function buildRecurringMarketSlug({ slugPrefix, windowMinutes, nowMs = Date.now(
   if (!prefix || !Number.isFinite(window) || window <= 0) return null;
   const bucketMs = Math.floor(nowMs / (window * 60_000)) * window * 60_000;
   return `${prefix}-${Math.floor(bucketMs / 1000)}`;
+}
+
+function buildCrossMarketConfig(variant) {
+  const config = {
+    marketSlug: String(variant?.crossMarketSlug ?? "").trim(),
+    marketSlugPrefix: String(variant?.crossMarketSlugPrefix ?? "").trim(),
+    marketWindowMinutes: Number.isFinite(Number(variant?.crossMarketWindowMinutes))
+      ? Number(variant.crossMarketWindowMinutes)
+      : null,
+    seriesId: String(variant?.crossMarketSeriesId ?? "").trim(),
+    seriesSlug: String(variant?.crossMarketSeriesSlug ?? "").trim(),
+    autoSelectLatest: true
+  };
+  const hasConfig =
+    Boolean(config.marketSlug) ||
+    Boolean(config.marketSlugPrefix) ||
+    Boolean(config.seriesId) ||
+    Boolean(config.seriesSlug);
+  return hasConfig ? config : null;
+}
+
+function pickAtrContextForWindow(klines5m, marketWindowMinutes) {
+  const windowMinutes = Number.isFinite(Number(marketWindowMinutes))
+    ? Math.max(5, Number(marketWindowMinutes))
+    : 5;
+  if (windowMinutes <= 5) {
+    return {
+      atr: computeAtr(klines5m, 14),
+      baseMinutes: 5
+    };
+  }
+  return computeAtrForWindow({
+    candles: klines5m,
+    candleMinutes: 5,
+    targetWindowMinutes: windowMinutes,
+    period: 14
+  });
 }
 
 function getStrategyMarketGroups() {
@@ -689,20 +727,43 @@ async function main() {
           : fetchChainlinkBtcUsd();
 
       const strategyMarketGroups = getStrategyMarketGroups();
+      const crossMarketConfigByVariantKey = new Map();
+      const uniqueCrossMarketConfigs = new Map();
+      for (const group of strategyMarketGroups) {
+        for (const variant of group.variants) {
+          const crossConfig = buildCrossMarketConfig(variant);
+          if (!crossConfig) continue;
+          const crossKey = buildMarketConfigKey(crossConfig);
+          crossMarketConfigByVariantKey.set(variant.key, crossKey);
+          if (!uniqueCrossMarketConfigs.has(crossKey)) {
+            uniqueCrossMarketConfigs.set(crossKey, crossConfig);
+          }
+        }
+      }
       const marketSnapshotsPromise = Promise.all(
         strategyMarketGroups.map(async (group) => ({
           ...group,
           poly: await fetchPolymarketSnapshot(group.marketConfig)
         }))
       );
+      const crossMarketSnapshotsPromise = Promise.all(
+        Array.from(uniqueCrossMarketConfigs.entries()).map(async ([crossKey, crossConfig]) => ({
+          key: crossKey,
+          poly: await fetchPolymarketSnapshot(crossConfig)
+        }))
+      );
 
-      const [klines1m, klines5m, lastPrice, chainlink, marketSnapshots] = await Promise.all([
+      const [klines1m, klines5m, lastPrice, chainlink, marketSnapshots, crossMarketSnapshots] = await Promise.all([
         fetchKlines({ interval: "1m", limit: 240 }),
         fetchKlines({ interval: "5m", limit: 200 }),
         fetchLastPrice(),
         chainlinkPromise,
-        marketSnapshotsPromise
+        marketSnapshotsPromise,
+        crossMarketSnapshotsPromise
       ]);
+      const crossMarketSnapshotByKey = new Map(
+        crossMarketSnapshots.map((snapshot) => [snapshot.key, snapshot.poly])
+      );
 
       const displaySnapshot =
         marketSnapshots.find((group) => group.key === "__default__") ??
@@ -863,11 +924,14 @@ async function main() {
       const ptbDelta = (currentPrice !== null && priceToBeat !== null && Number.isFinite(currentPrice) && Number.isFinite(priceToBeat))
         ? currentPrice - priceToBeat
         : null;
-      const volAtrUsd = computeAtr(klines5m, 14);
+      const displayAtrContext = pickAtrContextForWindow(klines5m, marketDecisionWindowMinutes);
+      const volAtrUsd = displayAtrContext.atr;
       const oracleProbUp = estimateOracleProbability({
         ptbDelta,
         volAtr: volAtrUsd,
-        minutesLeft: timeLeftMin
+        minutesLeft: timeLeftMin,
+        marketWindowMinutes: marketDecisionWindowMinutes,
+        atrBaseMinutes: displayAtrContext.baseMinutes
       });
       const fairModelUp = computeFairValue({
         probTa: timeAware.adjustedUp,
@@ -966,19 +1030,37 @@ async function main() {
             Number.isFinite(groupPriceToBeat)
               ? currentPrice - groupPriceToBeat
               : null;
+          const groupMarketWindowMinutes = Number.isFinite(Number(snapshotGroup?.marketConfig?.marketWindowMinutes))
+            ? Number(snapshotGroup.marketConfig.marketWindowMinutes)
+            : marketDecisionWindowMinutes;
+          const groupAtrContext = pickAtrContextForWindow(klines5m, groupMarketWindowMinutes);
           const groupMarketUp = groupPoly.ok ? groupPoly.prices?.up ?? null : null;
           const groupMarketDown = groupPoly.ok ? groupPoly.prices?.down ?? null : null;
           const groupModelOracleUp = estimateOracleProbability({
             ptbDelta: groupPtbDelta,
-            volAtr: volAtrUsd,
-            minutesLeft: groupSettlementLeftMin ?? timeLeftMin
+            volAtr: groupAtrContext.atr,
+            minutesLeft: groupSettlementLeftMin ?? timeLeftMin,
+            marketWindowMinutes: groupMarketWindowMinutes,
+            atrBaseMinutes: groupAtrContext.baseMinutes
           });
           const groupModelUp = computeFairValue({
-            probTa: fairModelUp,
+            probTa: timeAware.adjustedUp,
             probOracle: groupModelOracleUp,
-            weightTa: 0.5
+            weightTa: 0.45
           });
           const groupModelDown = 1 - groupModelUp;
+          const variantContexts = {};
+          for (const variant of snapshotGroup.variants) {
+            const crossKey = crossMarketConfigByVariantKey.get(variant.key);
+            if (!crossKey) continue;
+            const crossPoly = crossMarketSnapshotByKey.get(crossKey);
+            if (!crossPoly?.ok) continue;
+            variantContexts[variant.key] = {
+              crossMarketUpMid: midFromBook(crossPoly.orderbook?.up ?? {}, crossPoly.prices?.up ?? null),
+              crossMarketDownMid: midFromBook(crossPoly.orderbook?.down ?? {}, crossPoly.prices?.down ?? null),
+              crossMarketSlug: crossPoly.market?.slug ?? null
+            };
+          }
 
           const st = await runPaperStrategyTick({
             poly: groupPoly,
@@ -997,10 +1079,13 @@ async function main() {
             oraclePrice: currentPrice,
             binanceSpotPrice: spotPrice,
             priceToBeat: groupPriceToBeat,
-            volAtrUsd,
+            volAtrUsd: groupAtrContext.atr,
+            volAtrBaseMinutes: groupAtrContext.baseMinutes,
             rsiNow,
             macd,
             haNarrative,
+            regimeDetected: regimeInfo.regime,
+            variantContexts,
             variants: snapshotGroup.variants
           });
           if (st?.line) strategyStatusLine = st.line;

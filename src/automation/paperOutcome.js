@@ -53,14 +53,17 @@ export async function runPaperOutcomeTick() {
       if (!resolved.resolved || !resolved.winner) continue;
 
       const chosen = entry.chosen_side;
+      const remainingNotionalUsd = Number(entry.remaining_notional_usd ?? entry.notional_usd ?? 0);
+      const remainingShares = Number(entry.remaining_shares ?? entry.simulated_shares ?? 0);
+      const nextExitSequence = Math.max(1, Number(entry.last_exit_sequence ?? 0) + 1);
       let entryCorrect = null;
       let pnl = null;
-      if (chosen === "UP" || chosen === "DOWN") {
+      if ((chosen === "UP" || chosen === "DOWN") && remainingNotionalUsd > 0) {
         const r = computeSimulatedPnl({
           chosenSide: chosen,
           winnerSide: resolved.winner,
           entryPrice: entry.entry_price,
-          notionalUsd: entry.notional_usd
+          notionalUsd: remainingNotionalUsd
         });
         entryCorrect = r.entryCorrect;
         pnl = r.pnl;
@@ -93,7 +96,17 @@ export async function runPaperOutcomeTick() {
         entry_chosen_side: chosen,
         entry_correct: entryCorrect,
         pnl_simulated_usd: pnl,
-        dry_run: s.dryRun
+        dry_run: s.dryRun,
+        exit_sequence: nextExitSequence,
+        fraction_exited:
+          remainingShares > 0 && Number(entry.simulated_shares ?? 0) > 0
+            ? remainingShares / Number(entry.simulated_shares)
+            : null,
+        shares_exited: remainingShares > 0 ? remainingShares : null,
+        notional_exited_usd: remainingNotionalUsd > 0 ? remainingNotionalUsd : null,
+        remaining_shares: 0,
+        remaining_notional_usd: 0,
+        is_final_exit: true
       });
 
       if (!inserted) continue;

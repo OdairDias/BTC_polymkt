@@ -1,3 +1,33 @@
+import { computeCrossMarketConsistency } from "./crossMarket.js";
+
+function toFiniteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function pickEntryTier(entryPriceTiers, minutesLeft) {
+  if (!Array.isArray(entryPriceTiers)) return null;
+  const t = toFiniteNumber(minutesLeft);
+  if (t == null) return null;
+
+  for (const tier of entryPriceTiers) {
+    const min = toFiniteNumber(tier?.minutesLeftMin);
+    const max = toFiniteNumber(tier?.minutesLeftMax);
+    const aboveMin = min == null ? true : t >= min;
+    const belowMax = max == null ? true : t <= max;
+    if (aboveMin && belowMax) {
+      return tier;
+    }
+  }
+  return null;
+}
+
+function isTrendAgainstSide(regimeDetected, side) {
+  if (side === "UP") return regimeDetected === "TREND_DOWN";
+  if (side === "DOWN") return regimeDetected === "TREND_UP";
+  return false;
+}
+
 /**
  * Decide o lado na janela final.
  * - decisionMode=sniper_v2 (padrao atual): direcao por ptbDelta + filtros RSI/MACD/HA
@@ -33,7 +63,24 @@ export function decideLateWindowSide({
   ptbDelta,
   rsiNow,
   macd,
-  haNarrative
+  haNarrative,
+  entryPriceTiers,
+  maxSumMids,
+  minSumMids,
+  binaryDiscountBonus,
+  regimeDetected,
+  regimeGateEnabled,
+  regimeTrendEdgeMultiplier,
+  oracleLagMs,
+  oracleLagBonusEnabled,
+  oracleLagBonusMinMs,
+  oracleLagBonusMinDelta,
+  oracleLagBonusEdge,
+  crossMarketUpMid,
+  crossMarketDownMid,
+  crossMarketMaxDivergence,
+  crossMarketEdgeBonus,
+  crossMarketRequired
 }) {
   const window = Number(entryMinutesLeft);
   const eps = Number(epsilon) || 0;
@@ -64,8 +111,8 @@ export function decideLateWindowSide({
   }
 
   if (mode === "cheap_revert") {
-    const upAsk = Number.isFinite(Number(upBuy)) ? Number(upBuy) : null;
-    const downAsk = Number.isFinite(Number(downBuy)) ? Number(downBuy) : null;
+    const upAsk = toFiniteNumber(upBuy);
+    const downAsk = toFiniteNumber(downBuy);
     if (upAsk === null || downAsk === null) {
       return { inWindow: true, result: "SKIP_NO_BUY_PRICE", side: null, upMid, downMid };
     }
@@ -76,69 +123,206 @@ export function decideLateWindowSide({
 
     const chosenSide = upAsk < downAsk ? "UP" : "DOWN";
     const cheapPrice = chosenSide === "UP" ? upAsk : downAsk;
-    const maxEntry = Number(targetEntryPrice);
-    const minEntry = Number(minEntryPrice);
+    const entryTier = pickEntryTier(entryPriceTiers, t);
+    const maxEntry = toFiniteNumber(entryTier?.maxPrice) ?? toFiniteNumber(targetEntryPrice);
+    const minEntry = toFiniteNumber(minEntryPrice);
 
     if (!Number.isFinite(maxEntry) || maxEntry <= 0) {
       return { inWindow: true, result: "SKIP_BAD_TARGET_PRICE", side: null, upMid, downMid };
     }
     if (cheapPrice > maxEntry) {
-      return { inWindow: true, result: "SKIP_CHEAP_TOO_EXPENSIVE", side: null, upMid, downMid };
+      return {
+        inWindow: true,
+        result: "SKIP_CHEAP_TOO_EXPENSIVE",
+        side: null,
+        upMid,
+        downMid,
+        entryTier
+      };
     }
     if (Number.isFinite(minEntry) && minEntry > 0 && cheapPrice < minEntry) {
-      return { inWindow: true, result: "SKIP_CHEAP_TOO_CHEAP", side: null, upMid, downMid };
+      return { inWindow: true, result: "SKIP_CHEAP_TOO_CHEAP", side: null, upMid, downMid, entryTier };
     }
 
-    const requiredEdge = Number(minEdge);
-    const requiredModelProb = Number(minModelProb);
-    const edgeGateEnabled = Number.isFinite(requiredEdge) && requiredEdge > 0;
-    const modelProbGateEnabled = Number.isFinite(requiredModelProb) && requiredModelProb > 0;
+    const sumMids = upMid + downMid;
+    const minValidSumMids = toFiniteNumber(minSumMids);
+    const maxValidSumMids = toFiniteNumber(maxSumMids);
+    if (minValidSumMids != null && sumMids < minValidSumMids) {
+      return {
+        inWindow: true,
+        result: "SKIP_BINARY_SUM_TOO_LOW",
+        side: null,
+        upMid,
+        downMid,
+        binarySumMids: sumMids,
+        entryTier
+      };
+    }
+    if (maxValidSumMids != null && sumMids > maxValidSumMids) {
+      return {
+        inWindow: true,
+        result: "SKIP_BINARY_SPREAD_TOO_WIDE",
+        side: null,
+        upMid,
+        downMid,
+        binarySumMids: sumMids,
+        entryTier
+      };
+    }
+
+    const requiredEdge = toFiniteNumber(entryTier?.minEdge) ?? toFiniteNumber(minEdge);
+    const requiredModelProb = toFiniteNumber(entryTier?.minModelProb) ?? toFiniteNumber(minModelProb);
+    const requiredBookImbalance = toFiniteNumber(entryTier?.minBookImbalance) ?? toFiniteNumber(minBookImbalance);
+    const edgeGateEnabled = requiredEdge != null && requiredEdge > 0;
+    const modelProbGateEnabled = requiredModelProb != null && requiredModelProb > 0;
 
     const selectedModelProbRaw = chosenSide === "UP" ? modelUp : modelDown;
     const selectedMarketProbRaw = chosenSide === "UP" ? marketUp : marketDown;
     const selectedBookImbalanceRaw = chosenSide === "UP" ? upBookImbalance : downBookImbalance;
     const selectedSpreadRaw = chosenSide === "UP" ? upSpread : downSpread;
-    const selectedModelProb = Number.isFinite(Number(selectedModelProbRaw)) ? Number(selectedModelProbRaw) : null;
-    const selectedMarketProb = Number.isFinite(Number(selectedMarketProbRaw)) ? Number(selectedMarketProbRaw) : null;
+    const selectedModelProb = toFiniteNumber(selectedModelProbRaw);
+    const selectedMarketProb = toFiniteNumber(selectedMarketProbRaw);
     const selectedBookImbalance =
-      Number.isFinite(Number(selectedBookImbalanceRaw)) && Number(selectedBookImbalanceRaw) > 0
+      toFiniteNumber(selectedBookImbalanceRaw) != null && Number(selectedBookImbalanceRaw) > 0
         ? Number(selectedBookImbalanceRaw)
         : null;
     const selectedSpread =
-      Number.isFinite(Number(selectedSpreadRaw)) && Number(selectedSpreadRaw) >= 0
+      toFiniteNumber(selectedSpreadRaw) != null && Number(selectedSpreadRaw) >= 0
         ? Number(selectedSpreadRaw)
         : null;
-    const selectedEdge =
+    const selectedBaseEdge =
       selectedModelProb !== null && selectedMarketProb !== null
         ? selectedModelProb - selectedMarketProb
         : null;
 
     if (modelProbGateEnabled) {
       if (selectedModelProb === null) {
-        return { inWindow: true, result: "SKIP_MODEL_PROB_UNAVAILABLE", side: null, upMid, downMid };
+        return { inWindow: true, result: "SKIP_MODEL_PROB_UNAVAILABLE", side: null, upMid, downMid, entryTier };
       }
       if (selectedModelProb < requiredModelProb) {
-        return { inWindow: true, result: "SKIP_MODEL_PROB_TOO_LOW", side: null, upMid, downMid };
+        return { inWindow: true, result: "SKIP_MODEL_PROB_TOO_LOW", side: null, upMid, downMid, entryTier };
       }
     }
+
+    const binaryDiscount = Number.isFinite(sumMids) ? 1 - sumMids : null;
+    const binaryEdgeBonus =
+      binaryDiscount != null && binaryDiscount > 0
+        ? binaryDiscount * (toFiniteNumber(binaryDiscountBonus) ?? 0)
+        : 0;
+
+    const lag = toFiniteNumber(oracleLagMs);
+    const lagDelta = Math.abs(toFiniteNumber(ptbDelta) ?? 0);
+    const lagAligned =
+      (chosenSide === "UP" && (toFiniteNumber(ptbDelta) ?? 0) > 0) ||
+      (chosenSide === "DOWN" && (toFiniteNumber(ptbDelta) ?? 0) < 0);
+    const oracleLagEdgeBonus =
+      oracleLagBonusEnabled &&
+      lag != null &&
+      lag >= (toFiniteNumber(oracleLagBonusMinMs) ?? 0) &&
+      lagDelta >= (toFiniteNumber(oracleLagBonusMinDelta) ?? 0) &&
+      lagAligned
+        ? (toFiniteNumber(oracleLagBonusEdge) ?? 0)
+        : 0;
+
+    const crossMarket = computeCrossMarketConsistency({
+      primaryUpMid: upMid,
+      primaryDownMid: downMid,
+      confirmUpMid: crossMarketUpMid,
+      confirmDownMid: crossMarketDownMid,
+      chosenSide
+    });
+    const maxCrossDivergence = toFiniteNumber(crossMarketMaxDivergence);
+    if (
+      crossMarket.primaryImpliedUp != null &&
+      crossMarket.confirmImpliedUp != null &&
+      maxCrossDivergence != null &&
+      crossMarket.divergence != null &&
+      crossMarket.divergence > maxCrossDivergence
+    ) {
+      return {
+        inWindow: true,
+        result: "SKIP_CROSS_MARKET_DIVERGENCE",
+        side: null,
+        upMid,
+        downMid,
+        entryTier,
+        binarySumMids: sumMids,
+        crossMarketConsistency: crossMarket.consistency,
+        crossMarketDivergence: crossMarket.divergence
+      };
+    }
+    if (
+      crossMarketRequired &&
+      crossMarket.alignedWithChosenSide === false
+    ) {
+      return {
+        inWindow: true,
+        result: "SKIP_CROSS_MARKET_AGAINST",
+        side: null,
+        upMid,
+        downMid,
+        entryTier,
+        binarySumMids: sumMids,
+        crossMarketConsistency: crossMarket.consistency,
+        crossMarketDivergence: crossMarket.divergence
+      };
+    }
+
+    const crossMarketBonus =
+      crossMarket.alignedWithChosenSide === true
+        ? (toFiniteNumber(crossMarketEdgeBonus) ?? 0)
+        : 0;
+    const selectedEdge =
+      selectedBaseEdge == null
+        ? null
+        : selectedBaseEdge + binaryEdgeBonus + oracleLagEdgeBonus + crossMarketBonus;
 
     if (edgeGateEnabled) {
       if (selectedEdge === null) {
-        return { inWindow: true, result: "SKIP_EDGE_UNAVAILABLE", side: null, upMid, downMid };
+        return { inWindow: true, result: "SKIP_EDGE_UNAVAILABLE", side: null, upMid, downMid, entryTier };
       }
       if (selectedEdge < requiredEdge) {
-        return { inWindow: true, result: "SKIP_EDGE_TOO_SMALL", side: null, upMid, downMid };
+        return {
+          inWindow: true,
+          result: "SKIP_EDGE_TOO_SMALL",
+          side: null,
+          upMid,
+          downMid,
+          entryTier,
+          selectedBaseEdge,
+          selectedEdge
+        };
       }
     }
 
-    const requiredBookImbalance = Number(minBookImbalance);
-    const bookImbalanceGateEnabled = Number.isFinite(requiredBookImbalance) && requiredBookImbalance > 0;
+    const bookImbalanceGateEnabled = requiredBookImbalance != null && requiredBookImbalance > 0;
     if (bookImbalanceGateEnabled) {
       if (selectedBookImbalance === null) {
-        return { inWindow: true, result: "SKIP_BOOK_IMBALANCE_UNAVAILABLE", side: null, upMid, downMid };
+        return { inWindow: true, result: "SKIP_BOOK_IMBALANCE_UNAVAILABLE", side: null, upMid, downMid, entryTier };
       }
       if (selectedBookImbalance < requiredBookImbalance) {
-        return { inWindow: true, result: "SKIP_BOOK_IMBALANCE_TOO_LOW", side: null, upMid, downMid };
+        return { inWindow: true, result: "SKIP_BOOK_IMBALANCE_TOO_LOW", side: null, upMid, downMid, entryTier };
+      }
+    }
+
+    const trendEdgeMultiplier =
+      toFiniteNumber(regimeTrendEdgeMultiplier) != null && Number(regimeTrendEdgeMultiplier) > 1
+        ? Number(regimeTrendEdgeMultiplier)
+        : 1;
+    if (regimeGateEnabled && isTrendAgainstSide(regimeDetected, chosenSide)) {
+      const trendRequiredEdge =
+        requiredEdge != null && requiredEdge > 0 ? requiredEdge * trendEdgeMultiplier : null;
+      if (trendRequiredEdge != null && (selectedEdge == null || selectedEdge < trendRequiredEdge)) {
+        return {
+          inWindow: true,
+          result: "SKIP_REGIME_TREND_AGAINST",
+          side: null,
+          upMid,
+          downMid,
+          entryTier,
+          selectedEdge,
+          regimeDetected
+        };
       }
     }
 
@@ -146,13 +330,13 @@ export function decideLateWindowSide({
     const spreadVsEdgeGateEnabled = Number.isFinite(spreadToEdgeRatio) && spreadToEdgeRatio > 0;
     if (spreadVsEdgeGateEnabled) {
       if (selectedSpread === null) {
-        return { inWindow: true, result: "SKIP_SPREAD_UNAVAILABLE", side: null, upMid, downMid };
+        return { inWindow: true, result: "SKIP_SPREAD_UNAVAILABLE", side: null, upMid, downMid, entryTier };
       }
       if (selectedEdge === null || selectedEdge <= 0) {
-        return { inWindow: true, result: "SKIP_SPREAD_EDGE_UNAVAILABLE", side: null, upMid, downMid };
+        return { inWindow: true, result: "SKIP_SPREAD_EDGE_UNAVAILABLE", side: null, upMid, downMid, entryTier };
       }
       if (selectedSpread >= spreadToEdgeRatio * selectedEdge) {
-        return { inWindow: true, result: "SKIP_SPREAD_TOO_WIDE_FOR_EDGE", side: null, upMid, downMid };
+        return { inWindow: true, result: "SKIP_SPREAD_TOO_WIDE_FOR_EDGE", side: null, upMid, downMid, entryTier };
       }
     }
 
@@ -162,11 +346,21 @@ export function decideLateWindowSide({
       side: chosenSide,
       upMid,
       downMid,
+      entryTier,
       selectedModelProb,
       selectedMarketProb,
+      selectedBaseEdge,
       selectedEdge,
       selectedBookImbalance,
-      selectedSpread
+      selectedSpread,
+      binarySumMids: sumMids,
+      binaryDiscount,
+      binaryEdgeBonus,
+      oracleLagEdgeBonus,
+      regimeDetected: regimeDetected ?? null,
+      crossMarketConsistency: crossMarket.consistency,
+      crossMarketDivergence: crossMarket.divergence,
+      crossMarketAligned: crossMarket.alignedWithChosenSide
     };
   }
 
