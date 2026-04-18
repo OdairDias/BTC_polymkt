@@ -95,9 +95,6 @@ export async function ensureStrategySchema(client) {
       ON strategy_paper_outcomes (market_slug);
     CREATE INDEX IF NOT EXISTS idx_strategy_paper_outcomes_created
       ON strategy_paper_outcomes (created_at DESC);
-    CREATE UNIQUE INDEX IF NOT EXISTS uq_strategy_paper_outcomes_entry_sequence
-      ON strategy_paper_outcomes (entry_id, exit_sequence);
-
     CREATE TABLE IF NOT EXISTS strategy_live_orders (
       id BIGSERIAL PRIMARY KEY,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
