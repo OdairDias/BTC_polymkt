@@ -375,6 +375,7 @@ function mergeStrategyVariant(base, candidate) {
       Number.isFinite(crossMarketWindowMinutes) && crossMarketWindowMinutes > 0
         ? crossMarketWindowMinutes
         : null,
+    crossMarketSlugPrefix: String(c.crossMarketSlugPrefix ?? base.crossMarketSlugPrefix ?? "").trim().toLowerCase(),
     crossMarketSeriesId: String(c.crossMarketSeriesId ?? base.crossMarketSeriesId ?? "").trim(),
     crossMarketSeriesSlug: String(c.crossMarketSeriesSlug ?? base.crossMarketSeriesSlug ?? "").trim().toLowerCase(),
     crossMarketMaxDivergence:
@@ -653,6 +654,7 @@ const baseVariant = {
   marketSeriesId: "",
   marketSeriesSlug: "",
   crossMarketWindowMinutes: null,
+  crossMarketSlugPrefix: "",
   crossMarketSeriesId: "",
   crossMarketSeriesSlug: "",
   crossMarketMaxDivergence: null,

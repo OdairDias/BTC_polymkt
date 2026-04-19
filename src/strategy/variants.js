@@ -155,9 +155,9 @@ export const STRATEGY_VARIANTS = [
     oracleLagBonusMinDelta: 15,
     oracleLagBonusEdge: 0.05,
     entryPriceTiers: [
-      { minutesLeftMin: 40, minutesLeftMax: 57, maxPrice: 0.28, minEdge: 0.12, minModelProb: 0.57 },
-      { minutesLeftMin: 20, minutesLeftMax: 40, maxPrice: 0.33, minEdge: 0.08, minModelProb: 0.54 },
-      { minutesLeftMin: 10, minutesLeftMax: 20, maxPrice: 0.38, minEdge: 0.06, minModelProb: 0.50, minBookImbalance: 0.68 }
+      { minutesLeftMin: 40, minutesLeftMax: 57, maxPrice: 0.32, minEdge: 0.11, minModelProb: 0.55 },
+      { minutesLeftMin: 20, minutesLeftMax: 40, maxPrice: 0.36, minEdge: 0.07, minModelProb: 0.52 },
+      { minutesLeftMin: 10, minutesLeftMax: 20, maxPrice: 0.42, minEdge: 0.05, minModelProb: 0.50, minBookImbalance: 0.65 }
     ],
     paperFillMode: "pessimistic",
     paperEntrySlippageBps: 25,
@@ -179,7 +179,7 @@ export const STRATEGY_VARIANTS = [
     marketSeriesId: "10114",
     marketSeriesSlug: "btc-up-or-down-hourly",
     crossMarketWindowMinutes: 15,
-    crossMarketSeriesId: "10684",
+    crossMarketSlugPrefix: "btc-updown-15m",
     crossMarketSeriesSlug: "btc-up-or-down-15m",
     crossMarketMaxDivergence: 0.15,
     crossMarketEdgeBonus: 0.02,

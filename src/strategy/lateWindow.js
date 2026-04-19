@@ -137,11 +137,22 @@ export function decideLateWindowSide({
         side: null,
         upMid,
         downMid,
-        entryTier
+        entryTier,
+        cheapPrice,
+        maxEntryPrice: maxEntry
       };
     }
     if (Number.isFinite(minEntry) && minEntry > 0 && cheapPrice < minEntry) {
-      return { inWindow: true, result: "SKIP_CHEAP_TOO_CHEAP", side: null, upMid, downMid, entryTier };
+      return {
+        inWindow: true,
+        result: "SKIP_CHEAP_TOO_CHEAP",
+        side: null,
+        upMid,
+        downMid,
+        entryTier,
+        cheapPrice,
+        minEntryPrice: minEntry
+      };
     }
 
     const sumMids = upMid + downMid;
@@ -197,10 +208,27 @@ export function decideLateWindowSide({
 
     if (modelProbGateEnabled) {
       if (selectedModelProb === null) {
-        return { inWindow: true, result: "SKIP_MODEL_PROB_UNAVAILABLE", side: null, upMid, downMid, entryTier };
+        return {
+          inWindow: true,
+          result: "SKIP_MODEL_PROB_UNAVAILABLE",
+          side: null,
+          upMid,
+          downMid,
+          entryTier,
+          requiredModelProb
+        };
       }
       if (selectedModelProb < requiredModelProb) {
-        return { inWindow: true, result: "SKIP_MODEL_PROB_TOO_LOW", side: null, upMid, downMid, entryTier };
+        return {
+          inWindow: true,
+          result: "SKIP_MODEL_PROB_TOO_LOW",
+          side: null,
+          upMid,
+          downMid,
+          entryTier,
+          selectedModelProb,
+          requiredModelProb
+        };
       }
     }
 
@@ -233,6 +261,7 @@ export function decideLateWindowSide({
     });
     const maxCrossDivergence = toFiniteNumber(crossMarketMaxDivergence);
     if (
+      crossMarketRequired &&
       crossMarket.primaryImpliedUp != null &&
       crossMarket.confirmImpliedUp != null &&
       maxCrossDivergence != null &&
@@ -248,7 +277,8 @@ export function decideLateWindowSide({
         entryTier,
         binarySumMids: sumMids,
         crossMarketConsistency: crossMarket.consistency,
-        crossMarketDivergence: crossMarket.divergence
+        crossMarketDivergence: crossMarket.divergence,
+        maxCrossMarketDivergence: maxCrossDivergence
       };
     }
     if (
@@ -290,7 +320,8 @@ export function decideLateWindowSide({
           downMid,
           entryTier,
           selectedBaseEdge,
-          selectedEdge
+          selectedEdge,
+          requiredEdge
         };
       }
     }
@@ -298,10 +329,27 @@ export function decideLateWindowSide({
     const bookImbalanceGateEnabled = requiredBookImbalance != null && requiredBookImbalance > 0;
     if (bookImbalanceGateEnabled) {
       if (selectedBookImbalance === null) {
-        return { inWindow: true, result: "SKIP_BOOK_IMBALANCE_UNAVAILABLE", side: null, upMid, downMid, entryTier };
+        return {
+          inWindow: true,
+          result: "SKIP_BOOK_IMBALANCE_UNAVAILABLE",
+          side: null,
+          upMid,
+          downMid,
+          entryTier,
+          requiredBookImbalance
+        };
       }
       if (selectedBookImbalance < requiredBookImbalance) {
-        return { inWindow: true, result: "SKIP_BOOK_IMBALANCE_TOO_LOW", side: null, upMid, downMid, entryTier };
+        return {
+          inWindow: true,
+          result: "SKIP_BOOK_IMBALANCE_TOO_LOW",
+          side: null,
+          upMid,
+          downMid,
+          entryTier,
+          selectedBookImbalance,
+          requiredBookImbalance
+        };
       }
     }
 

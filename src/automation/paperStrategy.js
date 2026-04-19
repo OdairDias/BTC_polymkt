@@ -128,6 +128,7 @@ function buildVariantConfigHash(variant) {
       marketSeriesId: variant?.marketSeriesId ?? null,
       marketSeriesSlug: variant?.marketSeriesSlug ?? null,
       crossMarketWindowMinutes: variant?.crossMarketWindowMinutes ?? null,
+      crossMarketSlugPrefix: variant?.crossMarketSlugPrefix ?? null,
       crossMarketSeriesId: variant?.crossMarketSeriesId ?? null,
       crossMarketSeriesSlug: variant?.crossMarketSeriesSlug ?? null,
       crossMarketMaxDivergence: variant?.crossMarketMaxDivergence ?? null,
@@ -1828,6 +1829,24 @@ export async function runPaperStrategyTick({
             : null,
           Number.isFinite(Number(effectiveDecision?.selectedEdge))
             ? `edge=${Number(effectiveDecision.selectedEdge).toFixed(3)}`
+            : null,
+          Number.isFinite(Number(effectiveDecision?.maxEntryPrice))
+            ? `maxEntry=${Number(effectiveDecision.maxEntryPrice).toFixed(2)}`
+            : null,
+          Number.isFinite(Number(effectiveDecision?.requiredModelProb))
+            ? `reqModel=${Number(effectiveDecision.requiredModelProb).toFixed(3)}`
+            : null,
+          Number.isFinite(Number(effectiveDecision?.requiredEdge))
+            ? `reqEdge=${Number(effectiveDecision.requiredEdge).toFixed(3)}`
+            : null,
+          Number.isFinite(Number(effectiveDecision?.selectedBookImbalance))
+            ? `book=${Number(effectiveDecision.selectedBookImbalance).toFixed(2)}`
+            : null,
+          Number.isFinite(Number(effectiveDecision?.requiredBookImbalance))
+            ? `reqBook=${Number(effectiveDecision.requiredBookImbalance).toFixed(2)}`
+            : null,
+          Number.isFinite(Number(effectiveDecision?.crossMarketDivergence))
+            ? `xDiv=${Number(effectiveDecision.crossMarketDivergence).toFixed(3)}`
             : null
         ].filter(Boolean).join(" | ");
         const reasonText = monitorDetails
