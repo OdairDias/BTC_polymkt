@@ -392,13 +392,26 @@ function armTakeProfitState(state, payload) {
   state.marketSlug = payload.marketSlug;
   state.side = payload.side;
   state.tokenId = payload.tokenId != null ? String(payload.tokenId) : null;
-  state.takeProfitLevels = normalizeTakeProfitLevels(payload.takeProfitLevels, payload.targetPrice);
+  const entryPrice = toFiniteNumber(payload.entryPrice);
+  const minProfitCents = 0.01;
+  let takeProfitLevels = normalizeTakeProfitLevels(payload.takeProfitLevels, payload.targetPrice);
+  if (entryPrice != null && takeProfitLevels.length) {
+    const minTarget = Math.min(0.99, entryPrice + minProfitCents);
+    const filtered = takeProfitLevels.filter((level) => level.price >= minTarget);
+    if (filtered.length) {
+      // Re-normaliza fractions para somar 1 apos filtrar.
+      takeProfitLevels = normalizeTakeProfitLevels(filtered, null);
+    } else if (minTarget > 0 && minTarget < 1) {
+      takeProfitLevels = [{ price: minTarget, fraction: 1 }];
+    }
+  }
+  state.takeProfitLevels = takeProfitLevels;
   state.initialSizeShares = payload.initialSizeShares ?? payload.sizeShares;
   state.initialNotionalUsd = payload.initialNotionalUsd ?? payload.notionalUsd;
   state.sizeShares = payload.remainingShares ?? payload.sizeShares;
   state.notionalUsd = payload.remainingNotionalUsd ?? payload.notionalUsd;
   state.entryId = payload.entryId;
-  state.entryPrice = payload.entryPrice;
+  state.entryPrice = entryPrice;
   state.forceExitMinutesLeft = payload.forceExitMinutesLeft ?? null;
   state.nextLevelIndex = Math.max(0, Math.floor(Number(payload.nextLevelIndex) || 0));
   state.trailingStopEnabled = Boolean(payload.trailingStopEnabled);
