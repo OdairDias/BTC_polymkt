@@ -343,7 +343,7 @@ export async function insertPaperSignal(client, row) {
       regime_detected, vol_atr_base_minutes,
       entry_reason_code, entry_context_json, config_hash, git_commit
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40::jsonb,$41,$42
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42::jsonb,$43,$44
     )
     ON CONFLICT (strategy_key, market_slug) DO NOTHING
     RETURNING id`,
@@ -414,7 +414,7 @@ export async function ensurePaperSignal(client, row) {
       regime_detected, vol_atr_base_minutes,
       entry_reason_code, entry_context_json, config_hash, git_commit
     ) VALUES (
-      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40::jsonb,$41,$42
+      $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42::jsonb,$43,$44
     )
     ON CONFLICT (strategy_key, market_slug) DO UPDATE SET
       condition_id = COALESCE(EXCLUDED.condition_id, strategy_paper_signals.condition_id),
