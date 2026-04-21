@@ -84,7 +84,8 @@ export const STRATEGY_VARIANTS = [
     maxConsecutiveLosses: 999,
     rollingLossHours: 24,
     maxRollingLossUsd: 9999,
-    minPayoutMultiple: 2.0,
+    // (1-p)/p >= 1.5  =>  p <= 0.40. Deixa bot entrar mais, sem liberar preco caro demais.
+    minPayoutMultiple: 1.5,
     maxEntryPrice: 0.45,
     takeProfitEnabled: true,
     takeProfitPrice: 0.55,

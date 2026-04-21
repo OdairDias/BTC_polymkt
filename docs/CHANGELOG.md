@@ -1,5 +1,22 @@
 # Changelog
 
+## [switch-1h-test] - 2026-04-15
+
+### Nova variante live para mercado horario
+
+- Criada a estrategia `cheap_1h_tp45` (`decisionMode=cheap_revert`) para o mercado de 1 hora.
+- Parametros operacionais solicitados:
+  - entrada maxima: `targetEntryPrice=0.30` (`maxEntryPrice=0.30`)
+  - saida alvo: `takeProfitPrice=0.45`
+- Mercado configurado com fallback robusto por serie:
+  - `marketSeriesId=10114`
+  - `marketSeriesSlug=btc-up-or-down-hourly`
+
+### Isolamento do teste
+
+- `cheap_15m_tp35` foi mantida no codigo, mas com `enabled=false` para evitar concorrencia durante o teste de 1h.
+- Com isso, se `STRATEGY_LIVE_STRATEGY_KEY` continuar apontando para `cheap_15m_tp35`, o bootstrap automaticamente usa a primeira variante ativa (`cheap_1h_tp45`).
+
 ## [ajuste-strategia] - 2026-04-13
 
 ### Ajuste fino da `cheap_15m_tp35`

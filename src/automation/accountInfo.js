@@ -18,24 +18,30 @@ export async function getAccountStats() {
     let portfolioTotal = cash;
     let hasOpenPositions = false;
     let openPositionsCount = 0;
-
     try {
-        // Tenta obter saldo Web3 direto (Proxy de USDC)
-        const web3 = await clob.getWeb3Balance();
-        if (web3 && web3.balance) portfolioTotal = Math.max(portfolioTotal, Number(web3.balance));
+        const address = await clob.signer.getAddress();
+        
+        // 1. Array de valor das posições
+        const valRes = await fetch(`https://data-api.polymarket.com/value?user=${address}`);
+        if (valRes.ok) {
+            const valData = await valRes.json();
+            if (Array.isArray(valData) && valData.length > 0 && valData[0].value !== undefined) {
+                const posValueUsd = Number(valData[0].value);
+                portfolioTotal += posValueUsd * 1e6;
+            }
+        }
 
-        // Tenta listar posições (tokens) no CLOB
-        const positions = await clob.getOpenPositions();
-        if (Array.isArray(positions) && positions.length > 0) {
-            hasOpenPositions = true;
-            openPositionsCount = positions.length;
-            
-            // Soma o valor das posições (se disponível no retorno)
-            for (const pos of positions) {
-                // Se a posição tiver um 'size' (tokens) e um 'price' (market price)
-                const size = Number(pos.size || 0);
-                // Note: No SDK v5, posições são retornadas com valor nocional ou tamanho.
-                // Para manter simples, apenas marcamos a existência.
+        // 2. Tenta listar posições ativas para contagem
+        const posRes = await fetch(`https://data-api.polymarket.com/positions?user=${address}`);
+        if (posRes.ok) {
+            const positions = await posRes.json();
+            if (Array.isArray(positions)) {
+                // Filtra posições que não estejam zeradas (size > 0)
+                const active = positions.filter(p => Number(p.size) > 0);
+                if (active.length > 0) {
+                    hasOpenPositions = true;
+                    openPositionsCount = active.length;
+                }
             }
         }
     } catch (e) {

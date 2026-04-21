@@ -9,6 +9,7 @@
   "scripts": {
     "start": "node src/index.js",
     "test:creds": "node scripts/test-polymarket-creds.mjs",
+    "cron:eval": "node scripts/cron-strategy-eval-function.mjs",
     "report:strategy": "node scripts/report-strategy.mjs",
     "walkforward:strategy": "node scripts/walkforward-strategy.mjs",
     "train:model": "node scripts/train-probability-model.mjs"

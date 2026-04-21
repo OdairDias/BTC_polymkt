@@ -261,7 +261,7 @@ npm run report:strategy -- --hours=24
 Optional filters:
 
 ```bash
-npm run report:strategy -- --hours=48 --strategy=cheap_15m_tp35
+npm run report:strategy -- --hours=48 --strategy=cheap_1h_tp45
 npm run report:strategy -- --hours=24 --json
 ```
 
@@ -274,18 +274,35 @@ The report includes:
 - Config and commit trace (`config_hash` + `git_commit`)
 - Paper vs live comparison (entries, slippage, realized pnl)
 
+## Cron de avaliacao automatica (Railway Function)
+
+Para automatizar a avaliacao sem impactar o bot principal 24/7, use uma Function cron separada:
+
+```bash
+railway functions -e production new -n btc-strategy-eval-cron -p scripts/cron-strategy-eval-function.mjs -c "*/30 * * * *"
+railway variable set -s btc-strategy-eval-cron -e production "DATABASE_URL=\${{Postgres-DTnl.DATABASE_URL}}" "REPORT_WINDOW_HOURS=6" "REPORT_STRATEGY_KEY=cheap_1h_tp45"
+```
+
+O script `scripts/cron-strategy-eval-function.mjs` grava no log da Function um resumo do periodo (entradas, saidas, hit rate, pnl, erros live e top SKIPs).
+
+Teste local do script (quando o `DATABASE_URL` for acessivel da sua rede):
+
+```bash
+npm run cron:eval
+```
+
 ## Walk-forward OOS
 
 Run out-of-sample walk-forward to tune edge/probability thresholds on train and validate on future folds.
 
 ```bash
-npm run walkforward:strategy -- --days=30 --strategy=cheap_15m_tp35 --test-hours=24
+npm run walkforward:strategy -- --days=30 --strategy=cheap_1h_tp45 --test-hours=24
 ```
 
 JSON output:
 
 ```bash
-npm run walkforward:strategy -- --days=45 --strategy=cheap_15m_tp35 --json
+npm run walkforward:strategy -- --days=45 --strategy=cheap_1h_tp45 --json
 ```
 
 ## Offline training (baseline)
@@ -293,13 +310,13 @@ npm run walkforward:strategy -- --days=45 --strategy=cheap_15m_tp35 --json
 Train a logistic baseline using the feature store from `strategy_paper_signals` + `strategy_paper_outcomes`.
 
 ```bash
-npm run train:model -- --days=60 --strategy=cheap_15m_tp35
+npm run train:model -- --days=60 --strategy=cheap_1h_tp45
 ```
 
 JSON output:
 
 ```bash
-npm run train:model -- --days=90 --strategy=cheap_15m_tp35 --json
+npm run train:model -- --days=90 --strategy=cheap_1h_tp45 --json
 ```
 
 ## Safety

@@ -31,7 +31,8 @@ Este bot tenta combinar esses tres pontos usando dados externos (Binance/Chainli
 - `main_2m`: estrategia legado (da branch `main`) para comparacao A/B, decide por `upMid` vs `downMid` e entra pelo preco de compra.
 - `safe_90s`: variante sniper mais conservadora (preco alvo maior, notional menor e guardas possivelmente mais restritivos).
 - `aggr_35s`: variante sniper mais agressiva (janela menor e preco alvo mais baixo).
-- `cheap_15m_tp35`: estrategia de scalp em mercado `15m`, compra cedo o lado barato e tenta realizar em `0.44` antes do fim.
+- `cheap_1h_tp45`: estrategia de scalp em mercado `1h`, compra por tiers ate `0.42`, usa confirmacao suave do `15m` e realiza em TP escalonado.
+- `cheap_15m_tp35`: estrategia equivalente para mercado `15m` (mantida no codigo, atualmente desativada para teste A/B do `1h`).
 
 Arquivos:
 
@@ -39,6 +40,7 @@ Arquivos:
 - [main_2m.md](/Users/Odair/Desktop/Cursor/projeto_PLMK_BTC/PolymarketBTC15mAssistant/docs/strategies/main_2m.md)
 - [safe_90s.md](/Users/Odair/Desktop/Cursor/projeto_PLMK_BTC/PolymarketBTC15mAssistant/docs/strategies/safe_90s.md)
 - [aggr_35s.md](/Users/Odair/Desktop/Cursor/projeto_PLMK_BTC/PolymarketBTC15mAssistant/docs/strategies/aggr_35s.md)
+- [cheap_1h_tp45.md](/Users/Odair/Desktop/Cursor/projeto_PLMK_BTC/PolymarketBTC15mAssistant/docs/strategies/cheap_1h_tp45.md)
 - [cheap_15m_tp35.md](/Users/Odair/Desktop/Cursor/projeto_PLMK_BTC/PolymarketBTC15mAssistant/docs/strategies/cheap_15m_tp35.md)
 
 ## Modos de decisao (decisionMode)
