@@ -142,7 +142,8 @@ export const STRATEGY_VARIANTS = [
     trailingStopDropCents: 0.05,
     grossProfitTargetUsd: 0,
     minEdge: 0.05,
-    minModelProb: 0.52,
+    // cheap_revert often picks side < 0.50 implied; gate on edge + basic sanity, not absolute >0.50.
+    minModelProb: 0.30,
     minBookImbalance: 0.65,
     maxSpreadToEdgeRatio: 0.5,
     maxSumMids: 1.08,
@@ -155,9 +156,9 @@ export const STRATEGY_VARIANTS = [
     oracleLagBonusMinDelta: 15,
     oracleLagBonusEdge: 0.05,
     entryPriceTiers: [
-      { minutesLeftMin: 40, minutesLeftMax: 57, maxPrice: 0.32, minEdge: 0.11, minModelProb: 0.55 },
-      { minutesLeftMin: 20, minutesLeftMax: 40, maxPrice: 0.36, minEdge: 0.07, minModelProb: 0.52 },
-      { minutesLeftMin: 10, minutesLeftMax: 20, maxPrice: 0.42, minEdge: 0.05, minModelProb: 0.50, minBookImbalance: 0.65 }
+      { minutesLeftMin: 40, minutesLeftMax: 57, maxPrice: 0.32, minEdge: 0.11 },
+      { minutesLeftMin: 20, minutesLeftMax: 40, maxPrice: 0.36, minEdge: 0.07 },
+      { minutesLeftMin: 10, minutesLeftMax: 20, maxPrice: 0.39, minEdge: 0.05, minBookImbalance: 0.65 }
     ],
     paperFillMode: "pessimistic",
     paperEntrySlippageBps: 25,
