@@ -150,7 +150,7 @@ export const STRATEGY_VARIANTS = [
     minSumMids: 0.85,
     binaryDiscountBonus: 0.5,
     regimeGateEnabled: true,
-    regimeTrendEdgeMultiplier: 1.5,
+    regimeTrendEdgeMultiplier: 1.25,
     oracleLagBonusEnabled: true,
     oracleLagBonusMinMs: 5000,
     oracleLagBonusMinDelta: 15,
