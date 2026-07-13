@@ -5,6 +5,27 @@ import { getAccountStats } from "../automation/accountInfo.js";
 import { getStrategyPool, getStrategyPerformanceReport } from "../db/postgresStrategy.js";
 import { CONFIG } from "../config.js";
 
+function readDashboardAuthConfig() {
+  const username = String(process.env.DASHBOARD_BASIC_AUTH_USER ?? "").trim();
+  const password = String(process.env.DASHBOARD_BASIC_AUTH_PASSWORD ?? "");
+  const hasUser = username.length > 0;
+  const hasPass = password.length > 0;
+  if (hasUser !== hasPass) {
+    throw new Error("Dashboard auth incompleto: defina DASHBOARD_BASIC_AUTH_USER e DASHBOARD_BASIC_AUTH_PASSWORD juntos.");
+  }
+  return hasUser ? { username, password } : null;
+}
+
+function resolveDashboardHost() {
+  const host = String(process.env.DASHBOARD_HOST ?? "127.0.0.1").trim() || "127.0.0.1";
+  return host;
+}
+
+function hostIsLocalOnly(host) {
+  const normalized = String(host || "").trim().toLowerCase();
+  return normalized === "127.0.0.1" || normalized === "localhost" || normalized === "::1";
+}
+
 // Singleton to hold the bot's current status (populated from index.js)
 export const dashboardState = {
   activeMarket: "Starting...",
@@ -17,6 +38,13 @@ export const dashboardState = {
 
 export function startDashboard(port) {
   const finalPort = Number(port) || 8080;
+  const host = resolveDashboardHost();
+  const authConfig = readDashboardAuthConfig();
+  if (!hostIsLocalOnly(host) && !authConfig) {
+    throw new Error(
+      `Dashboard exposto em host nao local (${host}) sem auth. Defina DASHBOARD_BASIC_AUTH_USER e DASHBOARD_BASIC_AUTH_PASSWORD ou use DASHBOARD_HOST=127.0.0.1.`
+    );
+  }
   const app = express();
   app.use(cors());
   app.use(express.json());
@@ -28,11 +56,15 @@ export function startDashboard(port) {
   );
 
   // Autenticação Básica
-  app.use(basicAuth({
-      users: { 'odair': 'Odair@dias78' },
-      challenge: true,
-      realm: 'Polymarket Dashboard',
-  }));
+  if (authConfig) {
+    app.use(
+      basicAuth({
+        users: { [authConfig.username]: authConfig.password },
+        challenge: true,
+        realm: "Polymarket Dashboard"
+      })
+    );
+  }
 
   // 1. API: Account stats and current bot status
   app.get("/api/status", async (req, res) => {
@@ -325,8 +357,8 @@ export function startDashboard(port) {
     `);
   });
 
-  const server = app.listen(finalPort, "0.0.0.0", () => {
-    console.log(`[DASHBOARD] Web Server rodando na porta ${finalPort}`);
+  const server = app.listen(finalPort, host, () => {
+    console.log(`[DASHBOARD] Web Server rodando em ${host}:${finalPort}${authConfig ? " com basic auth" : " sem auth (host local)"}`);
   });
   
   return server;

@@ -165,6 +165,15 @@ WSS RPC (optional but recommended for more real-time fallback):
 
 The bot supports HTTP(S) proxies for both HTTP requests (fetch) and WebSocket connections.
 
+### Dashboard / operação na VPS
+
+- O dashboard agora é **seguro por padrão**: sobe em `127.0.0.1` se `DASHBOARD_HOST` não for definido.
+- Não existe mais credencial hardcoded no código.
+- Se quiser expor o dashboard fora do host, defina **os dois**:
+  - `DASHBOARD_BASIC_AUTH_USER`
+  - `DASHBOARD_BASIC_AUTH_PASSWORD`
+- Deploy supervisionado por `systemd --user`: ver `deploy/README.md` e `deploy/systemd/btc-polymkt-paper.service`.
+
 Supported env vars (standard):
 
 - `HTTPS_PROXY` / `https_proxy`

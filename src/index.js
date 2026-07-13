@@ -705,7 +705,7 @@ async function main() {
   ];
 
   // Inicia o dashboard na porta 9090 (Railway) ou na porta configurada
-  startDashboard(process.env.PORT || 9090);
+  startDashboard(process.env.DASHBOARD_PORT || process.env.PORT || 9090);
 
   while (true) {
     const timing = getCandleWindowTiming(CONFIG.candleWindowMinutes);

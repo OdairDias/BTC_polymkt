@@ -1,0 +1,15 @@
+[Unit]
+Description=BTC Polymarket papertrade bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/hermes/projects/BTC_polymkt
+ExecStart=/home/hermes/projects/BTC_polymkt/scripts/run_vps_paper.sh
+Restart=always
+RestartSec=10
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=default.target
