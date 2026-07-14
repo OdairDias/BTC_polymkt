@@ -114,7 +114,7 @@ export const STRATEGY_VARIANTS = [
     kellyFraction: 0.35,
     kellyMinNotionalUsd: 0.70,
     kellyMaxNotionalUsd: 1.0,
-    maxDailyLossUsd: 2.0,
+    maxDailyLossUsd: 9999.0,
     riskDayTimezone: "America/Sao_Paulo",
     forceExitMinutesLeft: 2.5,
     liveEntryOrderType: "FAK",
