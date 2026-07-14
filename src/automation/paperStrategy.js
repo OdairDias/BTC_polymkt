@@ -103,6 +103,7 @@ function buildVariantConfigHash(variant) {
       cycleTakeProfitDelta: variant?.cycleTakeProfitDelta ?? null,
       cycleStopLossDelta: variant?.cycleStopLossDelta ?? null,
       cycleMaxNotionalUsd: variant?.cycleMaxNotionalUsd ?? null,
+      cycleMaxReverseEntryPrice: variant?.cycleMaxReverseEntryPrice ?? null,
       cycleForceExitMinutesLeft: variant?.cycleForceExitMinutesLeft ?? null,
       trailingStopEnabled: variant?.trailingStopEnabled ?? null,
       trailingStopActivationPrice: variant?.trailingStopActivationPrice ?? null,
@@ -482,6 +483,7 @@ function getReversalConfig(variant) {
   const takeProfitDelta = toFiniteNumber(variant?.cycleTakeProfitDelta);
   const stopLossDelta = toFiniteNumber(variant?.cycleStopLossDelta);
   const maxNotionalUsd = toFiniteNumber(variant?.cycleMaxNotionalUsd);
+  const maxReverseEntryPrice = toFiniteNumber(variant?.cycleMaxReverseEntryPrice);
   const forceExitMinutesLeft = toFiniteNumber(variant?.cycleForceExitMinutesLeft);
   return {
     enabled,
@@ -491,6 +493,7 @@ function getReversalConfig(variant) {
     takeProfitDelta: takeProfitDelta != null && takeProfitDelta > 0 ? takeProfitDelta : 0.08,
     stopLossDelta: stopLossDelta != null && stopLossDelta > 0 ? stopLossDelta : 0.08,
     maxNotionalUsd: maxNotionalUsd != null && maxNotionalUsd > 0 ? maxNotionalUsd : null,
+    maxReverseEntryPrice: maxReverseEntryPrice != null && maxReverseEntryPrice > 0 ? Math.min(0.99, maxReverseEntryPrice) : null,
     forceExitMinutesLeft: forceExitMinutesLeft != null && forceExitMinutesLeft > 0 ? forceExitMinutesLeft : null
   };
 }
@@ -549,6 +552,7 @@ function buildReversalCycleContext({ reversalConfig, entryContext, variant }) {
     cycle_take_profit_delta: reversalConfig.takeProfitDelta,
     cycle_stop_loss_delta: reversalConfig.stopLossDelta,
     cycle_max_notional_usd: reversalConfig.maxNotionalUsd,
+    cycle_max_reverse_entry_price: reversalConfig.maxReverseEntryPrice,
     cycle_force_exit_minutes_left: reversalConfig.forceExitMinutesLeft,
     decision_mode: variant?.decisionMode ?? null,
     initial_entry_context: entryContext ?? null
@@ -1124,6 +1128,10 @@ export async function runPaperStrategyTick({
                     executionConfig: paperExecution
                   })
                 : null;
+              const reverseEntryTooExpensive =
+                reverseEntryPrice != null &&
+                reversalConfig.maxReverseEntryPrice != null &&
+                reverseEntryPrice > reversalConfig.maxReverseEntryPrice;
               const reverseNotionalUsd = computeRecoveryNotional({
                 baseNotionalUsd: activeReversalCycle.base_notional_usd,
                 accumulatedRealizedPnlUsd: accumulatedAfterExit,
@@ -1143,7 +1151,7 @@ export async function runPaperStrategyTick({
                   requiredShares: reverseShares,
                   liquiditySide: "ask"
                 });
-              if (reverseSide && reverseEntryPrice != null && reverseShares != null && hasReverseLiquidity) {
+              if (reverseSide && reverseEntryPrice != null && reverseShares != null && !reverseEntryTooExpensive && hasReverseLiquidity) {
                 const nextLegId = await createPaperCycleLeg(client, {
                   cycle_id: activeReversalCycle.cycle_id,
                   step: nextStep,
@@ -1184,15 +1192,21 @@ export async function runPaperStrategyTick({
                   leg_take_profit_price: reverseTargets.takeProfitPrice
                 };
               } else {
+                const stopReason = reverseEntryTooExpensive ? "STOP_REVERSAL_ENTRY_TOO_EXPENSIVE" : "STOP_NO_REVERSAL";
                 await completePaperCycle(client, {
                   cycle_id: activeReversalCycle.cycle_id,
                   status: "FAILED",
                   cycle_context_patch: {
-                    completed_reason: "STOP_NO_REVERSAL",
-                    accumulated_realized_pnl_usd: accumulatedAfterExit
+                    completed_reason: stopReason,
+                    accumulated_realized_pnl_usd: accumulatedAfterExit,
+                    reverse_entry_price: reverseEntryPrice,
+                    reverse_side: reverseSide,
+                    cycle_max_reverse_entry_price: reversalConfig.maxReverseEntryPrice
                   }
                 });
-                localPaperLine = `${ANSI_RED}${tag} CYCLE FAIL ${heldSide} stop @${executableBidPrice.toFixed(3)} sem reversal viável (PnL ${Number(realized.pnl ?? 0).toFixed(2)} | acc ${accumulatedAfterExit.toFixed(2)})${ANSI_RESET}`;
+                localPaperLine = reverseEntryTooExpensive
+                  ? `${ANSI_RED}${tag} CYCLE FAIL ${heldSide} stop @${executableBidPrice.toFixed(3)} sem reversal: entrada ${reverseSide} cara demais @${reverseEntryPrice.toFixed(3)} > ${reversalConfig.maxReverseEntryPrice.toFixed(3)} (PnL ${Number(realized.pnl ?? 0).toFixed(2)} | acc ${accumulatedAfterExit.toFixed(2)})${ANSI_RESET}`
+                  : `${ANSI_RED}${tag} CYCLE FAIL ${heldSide} stop @${executableBidPrice.toFixed(3)} sem reversal viável (PnL ${Number(realized.pnl ?? 0).toFixed(2)} | acc ${accumulatedAfterExit.toFixed(2)})${ANSI_RESET}`;
                 activeReversalCycle = null;
               }
             } else {

@@ -97,6 +97,7 @@ export const STRATEGY_VARIANTS = [
     cycleTakeProfitDelta: 0.08,
     cycleStopLossDelta: 0.08,
     cycleMaxNotionalUsd: 7.0,
+    cycleMaxReverseEntryPrice: 0.65,
     cycleForceExitMinutesLeft: 1.0,
     minEdge: 0.05,
     minModelProb: 0.50,
