@@ -10,6 +10,15 @@ import {
   resetStrategySchemaFlag,
   updatePaperSignalExecution
 } from "../db/postgresStrategy.js";
+import {
+  closePaperCycleLeg,
+  completePaperCycle,
+  createPaperCycle,
+  createPaperCycleLeg,
+  ensureReversalCycleSchemaOnce,
+  findActivePaperCycle,
+  markPaperCycleReversed
+} from "../db/postgresReversalCycle.js";
 import { decideLateWindowSide } from "../strategy/lateWindow.js";
 import { computeRealizedExitPnl } from "../strategy/outcomeInfer.js";
 import { applyPaperExecutionPrice, normalizePaperFillMode } from "../strategy/executionModel.js";
@@ -87,6 +96,14 @@ function buildVariantConfigHash(variant) {
       takeProfitEnabled: variant?.takeProfitEnabled ?? null,
       takeProfitPrice: variant?.takeProfitPrice ?? null,
       takeProfitLevels: variant?.takeProfitLevels ?? [],
+      reversalEnabled: variant?.reversalEnabled ?? null,
+      reversalMode: variant?.reversalMode ?? null,
+      cycleMaxSteps: variant?.cycleMaxSteps ?? null,
+      cycleTargetProfitUsd: variant?.cycleTargetProfitUsd ?? null,
+      cycleTakeProfitDelta: variant?.cycleTakeProfitDelta ?? null,
+      cycleStopLossDelta: variant?.cycleStopLossDelta ?? null,
+      cycleMaxNotionalUsd: variant?.cycleMaxNotionalUsd ?? null,
+      cycleForceExitMinutesLeft: variant?.cycleForceExitMinutesLeft ?? null,
       trailingStopEnabled: variant?.trailingStopEnabled ?? null,
       trailingStopActivationPrice: variant?.trailingStopActivationPrice ?? null,
       trailingStopDropCents: variant?.trailingStopDropCents ?? null,
@@ -456,6 +473,100 @@ function getTakeProfitConfig(variant) {
     trailingStopActivationPrice: trailingStopEnabled ? trailingStopActivationPrice : null,
     trailingStopDropCents: trailingStopEnabled ? trailingStopDropCents : null
   };
+}
+
+function getReversalConfig(variant) {
+  const enabled = Boolean(variant?.reversalEnabled);
+  const cycleMaxSteps = Math.max(1, Math.floor(Number(variant?.cycleMaxSteps) || 1));
+  const targetProfitUsd = Math.max(0, Number(variant?.cycleTargetProfitUsd) || 0);
+  const takeProfitDelta = toFiniteNumber(variant?.cycleTakeProfitDelta);
+  const stopLossDelta = toFiniteNumber(variant?.cycleStopLossDelta);
+  const maxNotionalUsd = toFiniteNumber(variant?.cycleMaxNotionalUsd);
+  const forceExitMinutesLeft = toFiniteNumber(variant?.cycleForceExitMinutesLeft);
+  return {
+    enabled,
+    mode: String(variant?.reversalMode || "flip_side"),
+    cycleMaxSteps,
+    targetProfitUsd,
+    takeProfitDelta: takeProfitDelta != null && takeProfitDelta > 0 ? takeProfitDelta : 0.08,
+    stopLossDelta: stopLossDelta != null && stopLossDelta > 0 ? stopLossDelta : 0.08,
+    maxNotionalUsd: maxNotionalUsd != null && maxNotionalUsd > 0 ? maxNotionalUsd : null,
+    forceExitMinutesLeft: forceExitMinutesLeft != null && forceExitMinutesLeft > 0 ? forceExitMinutesLeft : null
+  };
+}
+
+function clampProbabilityPrice(value) {
+  const num = toFiniteNumber(value);
+  if (num == null) return null;
+  return Math.max(0.01, Math.min(0.99, num));
+}
+
+function getOppositeSide(side) {
+  return side === "UP" ? "DOWN" : side === "DOWN" ? "UP" : null;
+}
+
+function computeCycleExitTargets(entryPrice, reversalConfig) {
+  const entry = toFiniteNumber(entryPrice);
+  if (entry == null || entry <= 0) {
+    return { takeProfitPrice: null, stopPrice: null };
+  }
+  return {
+    takeProfitPrice: clampProbabilityPrice(entry + reversalConfig.takeProfitDelta),
+    stopPrice: clampProbabilityPrice(entry - reversalConfig.stopLossDelta)
+  };
+}
+
+function computeRecoveryNotional({
+  baseNotionalUsd,
+  accumulatedRealizedPnlUsd,
+  targetProfitUsd,
+  entryPrice,
+  takeProfitDelta,
+  maxNotionalUsd
+}) {
+  const base = Math.max(0.01, Number(baseNotionalUsd) || 1);
+  const entry = toFiniteNumber(entryPrice);
+  const delta = toFiniteNumber(takeProfitDelta);
+  if (entry == null || entry <= 0 || delta == null || delta <= 0) {
+    return base;
+  }
+  const expectedReturnFraction = delta / entry;
+  if (!Number.isFinite(expectedReturnFraction) || expectedReturnFraction <= 0) {
+    return base;
+  }
+  const shortfall = Math.max(0, -(Number(accumulatedRealizedPnlUsd) || 0)) + Math.max(0, Number(targetProfitUsd) || 0);
+  const required = shortfall > 0 ? shortfall / expectedReturnFraction : base;
+  const bounded = Math.max(base, required);
+  return maxNotionalUsd != null && maxNotionalUsd > 0 ? Math.min(bounded, maxNotionalUsd) : bounded;
+}
+
+function buildReversalCycleContext({ reversalConfig, entryContext, variant }) {
+  return {
+    engine: "reversal_cycle_v1",
+    reversal_mode: reversalConfig.mode,
+    cycle_max_steps: reversalConfig.cycleMaxSteps,
+    cycle_target_profit_usd: reversalConfig.targetProfitUsd,
+    cycle_take_profit_delta: reversalConfig.takeProfitDelta,
+    cycle_stop_loss_delta: reversalConfig.stopLossDelta,
+    cycle_max_notional_usd: reversalConfig.maxNotionalUsd,
+    cycle_force_exit_minutes_left: reversalConfig.forceExitMinutesLeft,
+    decision_mode: variant?.decisionMode ?? null,
+    initial_entry_context: entryContext ?? null
+  };
+}
+
+function computeCycleMonitorText({ cycleRow, bidPrice, settlementLeftMin }) {
+  const parts = [
+    `CYCLE S${Number(cycleRow?.leg_step ?? 0) + 1}/${Number(cycleRow?.max_steps ?? 1)}`,
+    String(cycleRow?.leg_side || cycleRow?.active_side || "?")
+  ];
+  if (cycleRow?.leg_entry_price != null) parts.push(`entry ${Number(cycleRow.leg_entry_price).toFixed(3)}`);
+  if (cycleRow?.leg_stop_price != null) parts.push(`stop ${Number(cycleRow.leg_stop_price).toFixed(3)}`);
+  if (cycleRow?.leg_take_profit_price != null) parts.push(`tp ${Number(cycleRow.leg_take_profit_price).toFixed(3)}`);
+  if (bidPrice != null) parts.push(`bid ${Number(bidPrice).toFixed(3)}`);
+  if (settlementLeftMin != null) parts.push(`t-${Number(settlementLeftMin).toFixed(2)}m`);
+  if (cycleRow?.accumulated_realized_pnl_usd != null) parts.push(`acc $${Number(cycleRow.accumulated_realized_pnl_usd).toFixed(2)}`);
+  return parts.join(" | ");
 }
 
 function computeLegExitSizing(state, fraction) {
@@ -869,6 +980,7 @@ export async function runPaperStrategyTick({
 
   const pool = getStrategyPool(s.databaseUrl);
   await ensureStrategySchemaOnce(pool);
+  await ensureReversalCycleSchemaOnce(pool);
   const client = await pool.connect();
 
   try {
@@ -884,13 +996,236 @@ export async function runPaperStrategyTick({
       const variantContext = variantContexts?.[key] ?? {};
       const tag = paperEnabled ? "DRY" : "LIVE";
       const takeProfit = getTakeProfitConfig(variant);
+      const reversalConfig = getReversalConfig(variant);
       const paperExecution = getPaperExecutionConfig(variant);
       const liveEntryOrderType = String(variant?.liveEntryOrderType || "FOK").toUpperCase();
       const liveExitOrderType = String(variant?.liveExitOrderType || liveEntryOrderType || "FOK").toUpperCase();
       let localLiveLine = lastLiveLineByStrategy.get(key) ?? null;
       let localPaperLine = lastPaperLineByStrategy.get(key) ?? null;
+      let activeReversalCycle = null;
 
-      if (!takeProfit.enabled) {
+      if (reversalConfig.enabled) {
+        activeReversalCycle = await findActivePaperCycle(client, { strategyKey: key });
+        if (activeReversalCycle?.cycle_id && activeReversalCycle.market_slug && activeReversalCycle.market_slug !== marketSlug) {
+          await completePaperCycle(client, {
+            cycle_id: activeReversalCycle.cycle_id,
+            status: "ABORTED",
+            cycle_context_patch: {
+              aborted_reason: "MARKET_ROLLED",
+              aborted_at_market_slug: marketSlug
+            }
+          });
+          activeReversalCycle = null;
+        }
+        if (activeReversalCycle?.cycle_id && (!activeReversalCycle.leg_id || !activeReversalCycle.leg_side || activeReversalCycle.leg_entry_price == null)) {
+          await completePaperCycle(client, {
+            cycle_id: activeReversalCycle.cycle_id,
+            status: "FAILED",
+            cycle_context_patch: {
+              completed_reason: "BROKEN_ACTIVE_LEG"
+            }
+          });
+          activeReversalCycle = null;
+        }
+
+        if (paperEnabled && activeReversalCycle?.cycle_id && activeReversalCycle.market_slug === marketSlug) {
+          const heldSide = String(activeReversalCycle.leg_side || activeReversalCycle.active_side || "");
+          const bidPrice = toFiniteNumber(sideBestBid(poly, heldSide));
+          const executableBidPrice = bidPrice != null
+            ? applyPaperExitPrice({
+                basePrice: bidPrice,
+                side: heldSide,
+                poly,
+                executionConfig: paperExecution
+              })
+            : null;
+          const timeStopDue =
+            reversalConfig.forceExitMinutesLeft != null &&
+            settlementLeftMin != null &&
+            Number.isFinite(Number(settlementLeftMin)) &&
+            Number(settlementLeftMin) <= reversalConfig.forceExitMinutesLeft;
+          const tpHit =
+            bidPrice != null &&
+            activeReversalCycle.leg_take_profit_price != null &&
+            Number(bidPrice) >= Number(activeReversalCycle.leg_take_profit_price);
+          const stopHit =
+            bidPrice != null &&
+            activeReversalCycle.leg_stop_price != null &&
+            Number(bidPrice) <= Number(activeReversalCycle.leg_stop_price);
+
+          if ((tpHit || stopHit || timeStopDue) && executableBidPrice != null && executableBidPrice > 0) {
+            await client.query('BEGIN');
+            try {
+              const realized = computeRealizedExitPnl({
+              entryPrice: activeReversalCycle.leg_entry_price,
+              exitPrice: executableBidPrice,
+              notionalUsd: activeReversalCycle.leg_notional_usd
+            });
+            const exitReason = tpHit ? "TAKE_PROFIT" : stopHit ? "STOP_LOSS" : "TIME_EXIT";
+            const exitStatus = tpHit ? "TAKE_PROFIT" : stopHit ? "STOPPED" : "TIME_EXIT";
+            await closePaperCycleLeg(client, {
+              leg_id: activeReversalCycle.leg_id,
+              exit_price: executableBidPrice,
+              status: exitStatus,
+              exit_reason: exitReason,
+              realized_pnl_usd: realized.pnl,
+              exit_context_json: {
+                bid_price: bidPrice,
+                executable_bid_price: executableBidPrice,
+                settlement_left_min: settlementLeftMin,
+                trigger: exitReason
+              }
+            });
+
+            if (activeReversalCycle.signal_entry_id != null) {
+              await insertPaperOutcome(client, {
+                entry_id: activeReversalCycle.signal_entry_id,
+                strategy_key: key,
+                market_slug: marketSlug,
+                seconds_left_at_eval: settlementLeftMin != null ? Number(settlementLeftMin) * 60 : 0,
+                evaluation_method: "reversal_cycle_exit",
+                up_mid: upMid,
+                down_mid: downMid,
+                up_best_bid: upBook.bestBid ?? null,
+                up_best_ask: upBook.bestAsk ?? null,
+                down_best_bid: downBook.bestBid ?? null,
+                down_best_ask: downBook.bestAsk ?? null,
+                inferred_winner: tpHit ? heldSide : null,
+                outcome_code: tpHit ? "CYCLE_TAKE_PROFIT" : stopHit ? "CYCLE_STOP_LOSS" : "CYCLE_TIME_EXIT",
+                entry_chosen_side: heldSide,
+                entry_correct: realized.pnl > 0 ? true : realized.pnl < 0 ? false : null,
+                pnl_simulated_usd: realized.pnl,
+                dry_run: s.dryRun,
+                exit_price: executableBidPrice,
+                exit_reason: exitReason,
+                exited_early: true,
+                exit_sequence: Number(activeReversalCycle.leg_step ?? 0) + 1,
+                fraction_exited: 1,
+                shares_exited: activeReversalCycle.leg_shares,
+                notional_exited_usd: activeReversalCycle.leg_notional_usd,
+                remaining_shares: 0,
+                remaining_notional_usd: 0,
+                is_final_exit: !(stopHit && Number(activeReversalCycle.current_step ?? 0) + 1 < Number(activeReversalCycle.max_steps ?? 1))
+              });
+            }
+
+            const accumulatedAfterExit = Number(activeReversalCycle.accumulated_realized_pnl_usd ?? 0) + Number(realized.pnl ?? 0);
+            const nextStep = Number(activeReversalCycle.current_step ?? 0) + 1;
+            const canReverse = stopHit && nextStep < Number(activeReversalCycle.max_steps ?? 1);
+            if (canReverse) {
+              const reverseSide = getOppositeSide(heldSide);
+              const reverseBuyRaw = reverseSide === "UP" ? upBuy : downBuy;
+              const reverseEntryBase = toFiniteNumber(reverseBuyRaw);
+              const reverseEntryPrice = reverseEntryBase != null
+                ? applyPaperEntryPrice({
+                    basePrice: reverseEntryBase,
+                    side: reverseSide,
+                    poly,
+                    executionConfig: paperExecution
+                  })
+                : null;
+              const reverseNotionalUsd = computeRecoveryNotional({
+                baseNotionalUsd: activeReversalCycle.base_notional_usd,
+                accumulatedRealizedPnlUsd: accumulatedAfterExit,
+                targetProfitUsd: activeReversalCycle.target_profit_usd,
+                entryPrice: reverseEntryPrice,
+                takeProfitDelta: activeReversalCycle.take_profit_delta,
+                maxNotionalUsd: activeReversalCycle.max_notional_usd
+              });
+              const reverseShares = reverseEntryPrice != null && reverseEntryPrice > 0 ? reverseNotionalUsd / reverseEntryPrice : null;
+              const reverseTargets = computeCycleExitTargets(reverseEntryPrice, reversalConfig);
+              const hasReverseLiquidity =
+                reverseSide &&
+                reverseShares != null &&
+                hasEnoughBookLiquidity({
+                  side: reverseSide,
+                  poly,
+                  requiredShares: reverseShares,
+                  liquiditySide: "ask"
+                });
+              if (reverseSide && reverseEntryPrice != null && reverseShares != null && hasReverseLiquidity) {
+                const nextLegId = await createPaperCycleLeg(client, {
+                  cycle_id: activeReversalCycle.cycle_id,
+                  step: nextStep,
+                  side: reverseSide,
+                  entry_price: reverseEntryPrice,
+                  notional_usd: reverseNotionalUsd,
+                  shares: reverseShares,
+                  stop_price: reverseTargets.stopPrice,
+                  take_profit_price: reverseTargets.takeProfitPrice,
+                  status: "OPEN",
+                  parent_leg_id: activeReversalCycle.leg_id,
+                  entry_context_json: {
+                    trigger: "STOP_LOSS_REVERSAL",
+                    previous_leg_id: activeReversalCycle.leg_id,
+                    accumulated_after_exit: accumulatedAfterExit
+                  }
+                });
+                await markPaperCycleReversed(client, {
+                  cycle_id: activeReversalCycle.cycle_id,
+                  current_step: nextStep,
+                  active_side: reverseSide
+                });
+                filledSet.add(marketSlug);
+                localPaperLine = `${ANSI_YELLOW}${tag} REVERSAL S${nextStep + 1}/${activeReversalCycle.max_steps} ${heldSide}→${reverseSide} @${reverseEntryPrice.toFixed(3)} ($${reverseNotionalUsd.toFixed(2)}) after PnL ${Number(realized.pnl ?? 0).toFixed(2)}${ANSI_RESET}`;
+                activeReversalCycle = {
+                  ...activeReversalCycle,
+                  cycle_status: "ACTIVE",
+                  current_step: nextStep,
+                  active_side: reverseSide,
+                  accumulated_realized_pnl_usd: accumulatedAfterExit,
+                  leg_id: nextLegId,
+                  leg_step: nextStep,
+                  leg_side: reverseSide,
+                  leg_entry_price: reverseEntryPrice,
+                  leg_notional_usd: reverseNotionalUsd,
+                  leg_shares: reverseShares,
+                  leg_stop_price: reverseTargets.stopPrice,
+                  leg_take_profit_price: reverseTargets.takeProfitPrice
+                };
+              } else {
+                await completePaperCycle(client, {
+                  cycle_id: activeReversalCycle.cycle_id,
+                  status: "FAILED",
+                  cycle_context_patch: {
+                    completed_reason: "STOP_NO_REVERSAL",
+                    accumulated_realized_pnl_usd: accumulatedAfterExit
+                  }
+                });
+                localPaperLine = `${ANSI_RED}${tag} CYCLE FAIL ${heldSide} stop @${executableBidPrice.toFixed(3)} sem reversal viável (PnL ${Number(realized.pnl ?? 0).toFixed(2)} | acc ${accumulatedAfterExit.toFixed(2)})${ANSI_RESET}`;
+                activeReversalCycle = null;
+              }
+            } else {
+              const finalStatus = accumulatedAfterExit >= 0 ? "COMPLETED" : "FAILED";
+              await completePaperCycle(client, {
+                cycle_id: activeReversalCycle.cycle_id,
+                status: finalStatus,
+                cycle_context_patch: {
+                  completed_reason: exitReason,
+                  accumulated_realized_pnl_usd: accumulatedAfterExit
+                }
+              });
+              localPaperLine = `${accumulatedAfterExit >= 0 ? ANSI_GREEN : ANSI_RED}${tag} CYCLE ${finalStatus} ${heldSide} ${exitReason} @${executableBidPrice.toFixed(3)} (leg ${Number(realized.pnl ?? 0).toFixed(2)} | acc ${accumulatedAfterExit.toFixed(2)})${ANSI_RESET}`;
+              activeReversalCycle = null;
+            }
+            await client.query('COMMIT');
+            } catch (cycleErr) {
+              await client.query('ROLLBACK');
+              throw cycleErr;
+            }
+          } else {
+            filledSet.add(marketSlug);
+            localPaperLine = `${ANSI_YELLOW}${tag} ${computeCycleMonitorText({ cycleRow: activeReversalCycle, bidPrice, settlementLeftMin })}${ANSI_RESET}`;
+          }
+          sniperStateByStrategy.set(key, sniperState);
+          paperTakeProfitStateByStrategy.set(key, paperTakeProfitState);
+          liveTakeProfitStateByStrategy.set(key, liveTakeProfitState);
+          lastLiveLineByStrategy.set(key, localLiveLine);
+          lastPaperLineByStrategy.set(key, localPaperLine);
+          filledMarketsByStrategy.set(key, filledSet);
+          continue;
+        }
+      } else if (!takeProfit.enabled) {
         clearTakeProfitState(paperTakeProfitState);
         clearTakeProfitState(liveTakeProfitState);
       } else {
@@ -1615,6 +1950,7 @@ export async function runPaperStrategyTick({
 
       const isContinuous = variant.decisionMode === "cheap_revert";
       const hasOpenPosition =
+        (reversalConfig.enabled && activeReversalCycle?.cycle_id && activeReversalCycle.market_slug === marketSlug) ||
         hasOpenTrackedPosition(paperTakeProfitState, marketSlug) ||
         hasOpenTrackedPosition(liveTakeProfitState, marketSlug) ||
         (sniperState.active && sniperState.marketSlug === marketSlug);
@@ -2029,7 +2365,73 @@ export async function runPaperStrategyTick({
           localLiveLine = null;
         }
 
-        if (paperEnabled && takeProfit.enabled) {
+        if (paperEnabled && reversalConfig.enabled) {
+          const cycleTargets = computeCycleExitTargets(entryPrice, reversalConfig);
+          const cycleId = await createPaperCycle(client, {
+            strategy_key: key,
+            market_slug: marketSlug,
+            signal_entry_id: signalId,
+            status: "ACTIVE",
+            current_step: 0,
+            max_steps: reversalConfig.cycleMaxSteps,
+            active_side: effectiveDecision.side,
+            base_notional_usd: activeNotionalUsd,
+            accumulated_realized_pnl_usd: 0,
+            target_profit_usd: reversalConfig.targetProfitUsd,
+            stop_loss_delta: reversalConfig.stopLossDelta,
+            take_profit_delta: reversalConfig.takeProfitDelta,
+            max_notional_usd: reversalConfig.maxNotionalUsd,
+            force_exit_minutes_left: reversalConfig.forceExitMinutesLeft,
+            cycle_context_json: buildReversalCycleContext({
+              reversalConfig,
+              entryContext: entryAttributionContext,
+              variant
+            })
+          });
+          const legId = await createPaperCycleLeg(client, {
+            cycle_id: cycleId,
+            step: 0,
+            side: effectiveDecision.side,
+            entry_price: entryPrice,
+            notional_usd: activeNotionalUsd,
+            shares: simulatedShares,
+            stop_price: cycleTargets.stopPrice,
+            take_profit_price: cycleTargets.takeProfitPrice,
+            status: "OPEN",
+            entry_context_json: {
+              trigger: "INITIAL_ENTRY",
+              signal_id: signalId,
+              decision_result: effectiveDecision?.result ?? null
+            }
+          });
+          filledSet.add(marketSlug);
+          activeReversalCycle = {
+            cycle_id: cycleId,
+            market_slug: marketSlug,
+            signal_entry_id: signalId,
+            cycle_status: "ACTIVE",
+            current_step: 0,
+            max_steps: reversalConfig.cycleMaxSteps,
+            active_side: effectiveDecision.side,
+            base_notional_usd: activeNotionalUsd,
+            accumulated_realized_pnl_usd: 0,
+            target_profit_usd: reversalConfig.targetProfitUsd,
+            take_profit_delta: reversalConfig.takeProfitDelta,
+            stop_loss_delta: reversalConfig.stopLossDelta,
+            max_notional_usd: reversalConfig.maxNotionalUsd,
+            leg_id: legId,
+            leg_step: 0,
+            leg_side: effectiveDecision.side,
+            leg_entry_price: entryPrice,
+            leg_notional_usd: activeNotionalUsd,
+            leg_shares: simulatedShares,
+            leg_stop_price: cycleTargets.stopPrice,
+            leg_take_profit_price: cycleTargets.takeProfitPrice
+          };
+          localLiveLine = shouldAttemptLiveOrder()
+            ? `${ANSI_GRAY}Live ainda bloqueado para reversal_cycle_v1 (paper somente)${ANSI_RESET}`
+            : localLiveLine;
+        } else if (paperEnabled && takeProfit.enabled) {
           filledSet.add(marketSlug);
           armTakeProfitState(paperTakeProfitState, {
             marketSlug,
@@ -2050,7 +2452,7 @@ export async function runPaperStrategyTick({
           });
         }
 
-        if (liveEntry?.ok && canLiveTrade) {
+        if (liveEntry?.ok && canLiveTrade && !reversalConfig.enabled) {
           filledSet.add(marketSlug);
           if (takeProfit.enabled) {
             armTakeProfitState(liveTakeProfitState, {

@@ -9,9 +9,23 @@ import {
 } from "../db/postgresStrategy.js";
 
 const ANSI_GREEN = "\x1b[32m";
+const ANSI_YELLOW = "\x1b[33m";
 const ANSI_RED = "\x1b[31m";
 const ANSI_GRAY = "\x1b[90m";
 const ANSI_RESET = "\x1b[0m";
+const STALE_MISSING_MARKET_GRACE_MS = 2 * 60 * 60 * 1000;
+
+function toTimestampMs(value) {
+  if (!value) return null;
+  const ts = Date.parse(String(value));
+  return Number.isFinite(ts) ? ts : null;
+}
+
+export function shouldFinalizeMissingMarketEntry(entry, { nowMs = Date.now(), graceMs = STALE_MISSING_MARKET_GRACE_MS } = {}) {
+  const marketEndMs = toTimestampMs(entry?.market_end_at);
+  if (marketEndMs == null) return false;
+  return nowMs >= marketEndMs + Math.max(0, Number(graceMs) || 0);
+}
 
 export function resetOutcomeTrailForTests() {
   // Mantido por compatibilidade com testes antigos.
@@ -41,21 +55,68 @@ export async function runPaperOutcomeTick() {
       const marketSlug = String(entry.market_slug ?? "");
       if (!marketSlug) continue;
 
-      let market;
-      try {
-        market = await fetchMarketBySlug(marketSlug);
-      } catch {
-        continue;
-      }
-      if (!market) continue;
-
-      const resolved = extractResolvedOutcomeFromMarket(market);
-      if (!resolved.resolved || !resolved.winner) continue;
-
       const chosen = entry.chosen_side;
       const remainingNotionalUsd = Number(entry.remaining_notional_usd ?? entry.notional_usd ?? 0);
       const remainingShares = Number(entry.remaining_shares ?? entry.simulated_shares ?? 0);
       const nextExitSequence = Math.max(1, Number(entry.last_exit_sequence ?? 0) + 1);
+
+      let market;
+      try {
+        market = await fetchMarketBySlug(marketSlug);
+      } catch {
+        market = null;
+      }
+
+      if (!market) {
+        if (!shouldFinalizeMissingMarketEntry(entry)) continue;
+        const { inserted } = await insertPaperOutcome(client, {
+          entry_id: entry.id,
+          strategy_key: strategyKey,
+          market_slug: marketSlug,
+          seconds_left_at_eval: 0,
+          evaluation_method: "gamma_market_missing_stale",
+          up_mid: null,
+          down_mid: null,
+          up_best_bid: null,
+          up_best_ask: null,
+          down_best_bid: null,
+          down_best_ask: null,
+          inferred_winner: null,
+          official_winner: null,
+          outcome_code: "OUTCOME_STALE_UNAVAILABLE",
+          official_resolution_status: "market_missing",
+          official_resolution_source: "gamma:/markets?slug",
+          official_resolved_at: null,
+          official_outcome_prices_json: null,
+          official_price_to_beat: null,
+          official_price_at_close: null,
+          entry_chosen_side: chosen,
+          entry_correct: null,
+          pnl_simulated_usd: null,
+          dry_run: s.dryRun,
+          exit_sequence: nextExitSequence,
+          fraction_exited:
+            remainingShares > 0 && Number(entry.simulated_shares ?? 0) > 0
+              ? remainingShares / Number(entry.simulated_shares)
+              : null,
+          shares_exited: remainingShares > 0 ? remainingShares : null,
+          notional_exited_usd: remainingNotionalUsd > 0 ? remainingNotionalUsd : null,
+          remaining_shares: 0,
+          remaining_notional_usd: 0,
+          is_final_exit: true,
+          exit_reason: "STALE_UNAVAILABLE"
+        });
+        if (!inserted) continue;
+        insertedCount += 1;
+        const staleWarn = `[${strategyKey}] WARN stale outcome finalized: Gamma sem slug histórico (${marketSlug})`;
+        console.warn(staleWarn);
+        lastLine = `${ANSI_YELLOW}${staleWarn}${ANSI_RESET}`;
+        continue;
+      }
+
+      const resolved = extractResolvedOutcomeFromMarket(market);
+      if (!resolved.resolved || !resolved.winner) continue;
+
       let entryCorrect = null;
       let pnl = null;
       if ((chosen === "UP" || chosen === "DOWN") && remainingNotionalUsd > 0) {

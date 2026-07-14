@@ -234,6 +234,13 @@ function mergeStrategyVariant(base, candidate) {
   const crossMarketWindowMinutes = Number(c.crossMarketWindowMinutes ?? base.crossMarketWindowMinutes);
   const crossMarketMaxDivergence = Number(c.crossMarketMaxDivergence ?? base.crossMarketMaxDivergence);
   const crossMarketEdgeBonus = Number(c.crossMarketEdgeBonus ?? base.crossMarketEdgeBonus);
+  const reversalEnabled = c.reversalEnabled === undefined ? Boolean(base.reversalEnabled) : Boolean(c.reversalEnabled);
+  const cycleMaxSteps = Number(c.cycleMaxSteps ?? base.cycleMaxSteps);
+  const cycleTargetProfitUsd = Number(c.cycleTargetProfitUsd ?? base.cycleTargetProfitUsd);
+  const cycleTakeProfitDelta = Number(c.cycleTakeProfitDelta ?? base.cycleTakeProfitDelta);
+  const cycleStopLossDelta = Number(c.cycleStopLossDelta ?? base.cycleStopLossDelta);
+  const cycleMaxNotionalUsd = Number(c.cycleMaxNotionalUsd ?? base.cycleMaxNotionalUsd);
+  const cycleForceExitMinutesLeft = Number(c.cycleForceExitMinutesLeft ?? base.cycleForceExitMinutesLeft);
   const takeProfitLevels = sanitizeTakeProfitLevels(
     c.takeProfitLevels,
     base.takeProfitLevels,
@@ -260,6 +267,14 @@ function mergeStrategyVariant(base, candidate) {
     takeProfitEnabled: c.takeProfitEnabled === undefined ? Boolean(base.takeProfitEnabled) : Boolean(c.takeProfitEnabled),
     takeProfitPrice: Number.isFinite(takeProfitPrice) ? Math.max(0.01, Math.min(0.99, takeProfitPrice)) : base.takeProfitPrice,
     takeProfitLevels,
+    reversalEnabled,
+    reversalMode: String(c.reversalMode ?? base.reversalMode ?? "flip_side"),
+    cycleMaxSteps: Number.isFinite(cycleMaxSteps) && cycleMaxSteps >= 1 ? Math.max(1, Math.floor(cycleMaxSteps)) : 1,
+    cycleTargetProfitUsd: Number.isFinite(cycleTargetProfitUsd) && cycleTargetProfitUsd >= 0 ? Math.max(0, cycleTargetProfitUsd) : 0,
+    cycleTakeProfitDelta: Number.isFinite(cycleTakeProfitDelta) && cycleTakeProfitDelta > 0 ? Math.min(0.99, cycleTakeProfitDelta) : null,
+    cycleStopLossDelta: Number.isFinite(cycleStopLossDelta) && cycleStopLossDelta > 0 ? Math.min(0.99, cycleStopLossDelta) : null,
+    cycleMaxNotionalUsd: Number.isFinite(cycleMaxNotionalUsd) && cycleMaxNotionalUsd > 0 ? Math.max(0.01, cycleMaxNotionalUsd) : null,
+    cycleForceExitMinutesLeft: Number.isFinite(cycleForceExitMinutesLeft) && cycleForceExitMinutesLeft > 0 ? cycleForceExitMinutesLeft : null,
     trailingStopEnabled:
       c.trailingStopEnabled === undefined ? Boolean(base.trailingStopEnabled) : Boolean(c.trailingStopEnabled),
     trailingStopActivationPrice:
