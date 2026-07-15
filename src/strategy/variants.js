@@ -214,4 +214,19 @@ if (cheap15mMain) {
     shadowOnly: true,
     cycleMaxSteps: 1
   });
+  STRATEGY_VARIANTS.push({
+    ...cheap15mMain,
+    key: "cheap_5m_full_shadow",
+    label: "Cheap Revert 5m (shadow completo UP/DOWN / sem recovery)",
+    entrySidePolicy: "BOTH",
+    shadowOnly: true,
+    entryMinutesLeft: 4.5833,
+    entryCloseMinutesLeft: 1.6667,
+    cycleMaxSteps: 1,
+    cycleForceExitMinutesLeft: 0.3333,
+    forceExitMinutesLeft: 0.8333,
+    marketWindowMinutes: 5,
+    marketSlugPrefix: "btc-updown-5m",
+    marketSeriesSlug: "btc-up-or-down-5m"
+  });
 }

@@ -788,9 +788,13 @@ function shouldFireStrategySnapshot(trailMap, marketSlug, settlementLeftMin, ent
   return prev === null || prev > w;
 }
 
-function aggregateLines(lineMap) {
+function aggregateLines(lineMap, variantSubset = null) {
   const parts = [];
+  const allowedKeys = Array.isArray(variantSubset) && variantSubset.length
+    ? new Set(variantSubset.map((variant) => String(variant?.key || "default")))
+    : null;
   for (const [key, value] of lineMap.entries()) {
+    if (allowedKeys && !allowedKeys.has(String(key))) continue;
     if (!value) continue;
     parts.push(`${key}: ${value}`);
   }
@@ -961,16 +965,16 @@ export async function runPaperStrategyTick({
   }
   if (!poly?.ok || !poly.market) {
     return {
-      line: aggregateLines(lastPaperLineByStrategy),
-      liveOrderLine: aggregateLines(lastLiveLineByStrategy)
+      line: aggregateLines(lastPaperLineByStrategy, variantSubset),
+      liveOrderLine: aggregateLines(lastLiveLineByStrategy, variantSubset)
     };
   }
 
   const marketSlug = String(poly.market.slug ?? "");
   if (!marketSlug) {
     return {
-      line: aggregateLines(lastPaperLineByStrategy),
-      liveOrderLine: aggregateLines(lastLiveLineByStrategy)
+      line: aggregateLines(lastPaperLineByStrategy, variantSubset),
+      liveOrderLine: aggregateLines(lastLiveLineByStrategy, variantSubset)
     };
   }
 
@@ -2533,8 +2537,8 @@ export async function runPaperStrategyTick({
 
     return {
       inserted: true,
-      line: aggregateLines(lastPaperLineByStrategy),
-      liveOrderLine: aggregateLines(lastLiveLineByStrategy)
+      line: aggregateLines(lastPaperLineByStrategy, variantSubset),
+      liveOrderLine: aggregateLines(lastLiveLineByStrategy, variantSubset)
     };
   } catch (e) {
     return { line: `${ANSI_RED}Strategy DB: ${e?.message ?? e}${ANSI_RESET}`, error: String(e?.message ?? e) };

@@ -727,6 +727,18 @@ for (const [key, variant] of byKey.entries()) {
       cycleMaxSteps: 1
     });
   }
+  if (key === "cheap_5m_full_shadow") {
+    byKey.set(key, {
+      ...byKey.get(key),
+      entrySidePolicy: "BOTH",
+      shadowOnly: true,
+      reversalEnabled: true,
+      cycleMaxSteps: 1,
+      marketWindowMinutes: 5,
+      marketSlugPrefix: "btc-updown-5m",
+      marketSeriesSlug: "btc-up-or-down-5m"
+    });
+  }
 }
 // 3. Se não tiver nenhuma variante de nenhum lado, usa o default antigo
 if (byKey.size === 0) {

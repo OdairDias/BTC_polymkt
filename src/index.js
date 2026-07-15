@@ -994,6 +994,8 @@ async function main() {
       let strategyStatusLine = null;
       let liveOrderStatusLine = null;
       let outcomeStatusLine = null;
+      const strategyStatusLines = [];
+      const liveOrderStatusLines = [];
       if (CONFIG.strategy.enabled) {
         const loopNowMs = Date.now();
         const binanceLagMs = Number.isFinite(Number(wsTick?.ts))
@@ -1091,9 +1093,12 @@ async function main() {
             variantContexts,
             variants: snapshotGroup.variants
           });
-          if (st?.line) strategyStatusLine = st.line;
-          if (st?.liveOrderLine) liveOrderStatusLine = st.liveOrderLine;
+          if (st?.line) strategyStatusLines.push(st.line);
+          if (st?.liveOrderLine) liveOrderStatusLines.push(st.liveOrderLine);
         }
+
+        strategyStatusLine = strategyStatusLines.join(" | ") || null;
+        liveOrderStatusLine = liveOrderStatusLines.join(" | ") || null;
 
         if (CONFIG.strategy.dryRun) {
           const ot = await runPaperOutcomeTick();

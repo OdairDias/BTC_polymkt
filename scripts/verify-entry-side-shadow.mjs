@@ -8,9 +8,11 @@ import { isVariantLiveExecutionAllowed } from "../src/strategy/variants.js";
 
 const main = CONFIG.strategy.variants.find((variant) => variant.key === "cheap_15m_tp35");
 const shadow = CONFIG.strategy.variants.find((variant) => variant.key === "cheap_15m_tp35_down_shadow");
+const m5Shadow = CONFIG.strategy.variants.find((variant) => variant.key === "cheap_5m_full_shadow");
 
 assert.ok(main, "main cheap_15m_tp35 variant must exist");
 assert.ok(shadow, "DOWN shadow variant must exist");
+assert.ok(m5Shadow, "full M5 shadow variant must exist");
 assert.equal(main.entrySidePolicy, "UP_ONLY");
 assert.equal(main.shadowOnly, false);
 assert.equal(main.cycleMaxSteps, 1);
@@ -19,12 +21,50 @@ assert.equal(shadow.shadowOnly, true);
 assert.equal(shadow.cycleMaxSteps, 1);
 assert.equal(isVariantLiveExecutionAllowed(main), false, "reversal lifecycle is paper-only");
 assert.equal(isVariantLiveExecutionAllowed(shadow), false, "shadow must be structurally live-disabled");
+assert.equal(m5Shadow.entrySidePolicy, "BOTH");
+assert.equal(m5Shadow.shadowOnly, true);
+assert.equal(m5Shadow.reversalEnabled, true);
+assert.equal(m5Shadow.cycleMaxSteps, 1);
+assert.equal(m5Shadow.marketWindowMinutes, 5);
+assert.equal(m5Shadow.marketSlugPrefix, "btc-updown-5m");
+assert.equal(m5Shadow.marketSeriesSlug, "btc-up-or-down-5m");
+assert.equal(m5Shadow.entryMinutesLeft, 4.5833);
+assert.equal(m5Shadow.entryCloseMinutesLeft, 1.6667);
+assert.equal(m5Shadow.cycleForceExitMinutesLeft, 0.3333);
+assert.equal(m5Shadow.forceExitMinutesLeft, 0.8333);
+assert.equal(isVariantLiveExecutionAllowed(m5Shadow), false, "M5 shadow must be structurally live-disabled");
+
+for (const field of [
+  "decisionMode",
+  "targetEntryPrice",
+  "minEntryPrice",
+  "notionalUsd",
+  "cycleTargetProfitUsd",
+  "cycleTakeProfitDelta",
+  "cycleStopLossDelta",
+  "minEdge",
+  "minModelProb",
+  "minBookImbalance",
+  "maxSpreadToEdgeRatio",
+  "paperFillMode",
+  "paperEntrySlippageBps",
+  "paperExitSlippageBps",
+  "paperSpreadPenaltyFactor",
+  "sizingMode",
+  "kellyFraction",
+  "kellyMinNotionalUsd",
+  "kellyMaxNotionalUsd"
+]) {
+  assert.deepEqual(m5Shadow[field], main[field], `M5 must replicate M15 field ${field}`);
+}
 
 const upDecision = { side: "UP", result: "UP", selectedEdge: 0.12 };
 const downDecision = { side: "DOWN", result: "DOWN", selectedEdge: 0.14 };
 
 assert.equal(applyEntrySidePolicy(upDecision, "UP_ONLY").side, "UP");
 assert.equal(applyEntrySidePolicy(downDecision, "DOWN_ONLY").side, "DOWN");
+assert.equal(applyEntrySidePolicy(upDecision, m5Shadow.entrySidePolicy).side, "UP");
+assert.equal(applyEntrySidePolicy(downDecision, m5Shadow.entrySidePolicy).side, "DOWN");
 
 const blockedDown = applyEntrySidePolicy(downDecision, "UP_ONLY");
 assert.equal(blockedDown.side, null);
@@ -84,7 +124,8 @@ const overrideProbe = spawnSync(process.execPath, [
   `import { CONFIG } from "./src/config.js";
    const main = CONFIG.strategy.variants.find(v => v.key === "cheap_15m_tp35");
    const shadow = CONFIG.strategy.variants.find(v => v.key === "cheap_15m_tp35_down_shadow");
-   console.log(JSON.stringify({ main, shadow, liveStrategyKey: CONFIG.strategy.liveStrategyKey }));`
+   const m5Shadow = CONFIG.strategy.variants.find(v => v.key === "cheap_5m_full_shadow");
+   console.log(JSON.stringify({ main, shadow, m5Shadow, liveStrategyKey: CONFIG.strategy.liveStrategyKey }));`
 ], {
   cwd: process.cwd(),
   encoding: "utf8",
@@ -104,6 +145,15 @@ const overrideProbe = spawnSync(process.execPath, [
         shadowOnly: false,
         reversalEnabled: false,
         cycleMaxSteps: 4
+      },
+      {
+        key: "cheap_5m_full_shadow",
+        entrySidePolicy: "UP_ONLY",
+        shadowOnly: false,
+        reversalEnabled: false,
+        cycleMaxSteps: 4,
+        marketWindowMinutes: 15,
+        marketSlugPrefix: "btc-updown-15m"
       }
     ])
   }
@@ -117,6 +167,12 @@ assert.equal(overrideConfig.shadow.entrySidePolicy, "DOWN_ONLY");
 assert.equal(overrideConfig.shadow.shadowOnly, true, "shadow suffix must remain paper-only under env override");
 assert.equal(overrideConfig.shadow.reversalEnabled, true);
 assert.equal(overrideConfig.shadow.cycleMaxSteps, 1);
+assert.equal(overrideConfig.m5Shadow.entrySidePolicy, "BOTH");
+assert.equal(overrideConfig.m5Shadow.shadowOnly, true);
+assert.equal(overrideConfig.m5Shadow.reversalEnabled, true);
+assert.equal(overrideConfig.m5Shadow.cycleMaxSteps, 1);
+assert.equal(overrideConfig.m5Shadow.marketWindowMinutes, 5);
+assert.equal(overrideConfig.m5Shadow.marketSlugPrefix, "btc-updown-5m");
 assert.equal(overrideConfig.liveStrategyKey, "__live_disabled__", "reversal strategy must not become live primary");
 
 console.log(JSON.stringify({
@@ -133,6 +189,15 @@ console.log(JSON.stringify({
     shadowOnly: shadow.shadowOnly,
     cycleMaxSteps: shadow.cycleMaxSteps
   },
+  m5Shadow: {
+    key: m5Shadow.key,
+    entrySidePolicy: m5Shadow.entrySidePolicy,
+    shadowOnly: m5Shadow.shadowOnly,
+    cycleMaxSteps: m5Shadow.cycleMaxSteps,
+    marketWindowMinutes: m5Shadow.marketWindowMinutes,
+    entryMinutesLeft: m5Shadow.entryMinutesLeft,
+    entryCloseMinutesLeft: m5Shadow.entryCloseMinutesLeft
+  },
   checks: {
     mainAllowsUp: true,
     mainBlocksDown: true,
@@ -141,6 +206,8 @@ console.log(JSON.stringify({
     legacyCycleStepsCapped: true,
     noRecovery: true,
     reversalLiveBlocked: true,
-    shadowOverrideFailClosed: true
+    shadowOverrideFailClosed: true,
+    m5ReplicatesM15Parameters: true,
+    m5RunsBothSidesTogether: true
   }
 }, null, 2));
