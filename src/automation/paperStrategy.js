@@ -11,6 +11,7 @@ import {
   updatePaperSignalExecution
 } from "../db/postgresStrategy.js";
 import {
+  capPaperCycleMaxSteps,
   closePaperCycleLeg,
   completePaperCycle,
   createPaperCycle,
@@ -19,11 +20,12 @@ import {
   findActivePaperCycle,
   markPaperCycleReversed
 } from "../db/postgresReversalCycle.js";
-import { decideLateWindowSide } from "../strategy/lateWindow.js";
+import { applyEntrySidePolicy, decideLateWindowSide } from "../strategy/lateWindow.js";
 import { computeRealizedExitPnl } from "../strategy/outcomeInfer.js";
 import { applyPaperExecutionPrice, normalizePaperFillMode } from "../strategy/executionModel.js";
 import { midFromBook } from "../strategy/pricing.js";
 import { chooseStrategyNotional } from "../strategy/sizing.js";
+import { isVariantLiveExecutionAllowed } from "../strategy/variants.js";
 import { resetLiveClobClient } from "./liveClob.js";
 import {
   readLiveSellableShares,
@@ -85,6 +87,8 @@ function buildVariantConfigHash(variant) {
       key: variant?.key ?? "default",
       decisionMode: variant?.decisionMode ?? "sniper_v2",
       contrarian: Boolean(variant?.contrarian),
+      entrySidePolicy: variant?.entrySidePolicy ?? "BOTH",
+      shadowOnly: Boolean(variant?.shadowOnly),
       entryMinutesLeft: variant?.entryMinutesLeft ?? null,
       entryCloseMinutesLeft: variant?.entryCloseMinutesLeft ?? null,
       targetEntryPrice: variant?.targetEntryPrice ?? null,
@@ -190,6 +194,8 @@ function buildEntryAttributionContext({
 }) {
   return {
     decision_mode: variant?.decisionMode ?? "sniper_v2",
+    entry_side_policy: variant?.entrySidePolicy ?? "BOTH",
+    shadow_only: Boolean(variant?.shadowOnly),
     decision_result: effectiveDecision?.result ?? null,
     entry_record_result_code: paperResultCode ?? null,
     side: effectiveDecision?.side ?? null,
@@ -1001,6 +1007,7 @@ export async function runPaperStrategyTick({
       const tag = paperEnabled ? "DRY" : "LIVE";
       const takeProfit = getTakeProfitConfig(variant);
       const reversalConfig = getReversalConfig(variant);
+      const liveExecutionAllowed = isVariantLiveExecutionAllowed(variant);
       const paperExecution = getPaperExecutionConfig(variant);
       const liveEntryOrderType = String(variant?.liveEntryOrderType || "FOK").toUpperCase();
       const liveExitOrderType = String(variant?.liveExitOrderType || liveEntryOrderType || "FOK").toUpperCase();
@@ -1010,6 +1017,12 @@ export async function runPaperStrategyTick({
 
       if (reversalConfig.enabled) {
         activeReversalCycle = await findActivePaperCycle(client, { strategyKey: key });
+        if (activeReversalCycle?.cycle_id) {
+          activeReversalCycle.max_steps = await capPaperCycleMaxSteps(client, {
+            cycleId: activeReversalCycle.cycle_id,
+            configuredMaxSteps: reversalConfig.cycleMaxSteps
+          });
+        }
         if (activeReversalCycle?.cycle_id && activeReversalCycle.market_slug && activeReversalCycle.market_slug !== marketSlug) {
           await completePaperCycle(client, {
             cycle_id: activeReversalCycle.cycle_id,
@@ -1281,7 +1294,7 @@ export async function runPaperStrategyTick({
           }
         }
 
-        if (shouldAttemptLiveOrder() && key === CONFIG.strategy.liveStrategyKey && !liveTakeProfitState.active) {
+        if (liveExecutionAllowed && shouldAttemptLiveOrder() && key === CONFIG.strategy.liveStrategyKey && !liveTakeProfitState.active) {
           const recoverLive = await findRecoverableLiveTakeProfitEntry(client, {
             strategyKey: key,
             marketSlug
@@ -1873,7 +1886,7 @@ export async function runPaperStrategyTick({
             });
           }
 
-          const canLiveTrade = shouldAttemptLiveOrder() && key === CONFIG.strategy.liveStrategyKey;
+          const canLiveTrade = liveExecutionAllowed && shouldAttemptLiveOrder() && key === CONFIG.strategy.liveStrategyKey;
           let liveEntry = null;
 
           if (canLiveTrade) {
@@ -2061,6 +2074,8 @@ export async function runPaperStrategyTick({
           result: `CONTRA_${effectiveDecision.result ?? effectiveDecision.side}`
         };
       }
+
+      effectiveDecision = applyEntrySidePolicy(effectiveDecision, variant.entrySidePolicy);
 
       const anchoredSniper = isAnchoredSniperVariant(variant);
       let entryPrice = null;
@@ -2350,7 +2365,7 @@ export async function runPaperStrategyTick({
         }
       } else if (signalId != null && (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN")) {
         const tokenId = effectiveDecision.side === "UP" ? poly.tokens?.upTokenId : poly.tokens?.downTokenId;
-        canLiveTrade = shouldAttemptLiveOrder() && key === CONFIG.strategy.liveStrategyKey;
+        canLiveTrade = liveExecutionAllowed && shouldAttemptLiveOrder() && key === CONFIG.strategy.liveStrategyKey;
 
         if (canLiveTrade && tokenId) {
           try {

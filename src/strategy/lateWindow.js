@@ -29,6 +29,21 @@ function isTrendAgainstSide(regimeDetected, side) {
   return false;
 }
 
+export function applyEntrySidePolicy(decision, policy = "BOTH") {
+  const normalized = String(policy || "BOTH").trim().toUpperCase();
+  const side = decision?.side;
+  if (side !== "UP" && side !== "DOWN") return decision;
+  if (normalized === "BOTH") return decision;
+  if (normalized === "UP_ONLY" && side === "UP") return decision;
+  if (normalized === "DOWN_ONLY" && side === "DOWN") return decision;
+  return {
+    ...decision,
+    blockedSide: side,
+    side: null,
+    result: `SKIP_ENTRY_SIDE_POLICY_${side}`
+  };
+}
+
 /**
  * Decide o lado na janela final.
  * - decisionMode=sniper_v2 (padrao atual): direcao por ptbDelta + filtros RSI/MACD/HA

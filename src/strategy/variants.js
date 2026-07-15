@@ -74,6 +74,8 @@ export const STRATEGY_VARIANTS = [
     label: "Cheap Revert 15m (TP 0.55 / sem GP fixo / edge 0.05 + micro)",
     enabled: true,
     decisionMode: "cheap_revert",
+    entrySidePolicy: "UP_ONLY",
+    shadowOnly: false,
     entryMinutesLeft: 13.75,
     entryCloseMinutesLeft: 5.0,
     targetEntryPrice: 0.45,
@@ -92,7 +94,7 @@ export const STRATEGY_VARIANTS = [
     grossProfitTargetUsd: 0,
     reversalEnabled: true,
     reversalMode: "flip_side",
-    cycleMaxSteps: 4,
+    cycleMaxSteps: 1,
     cycleTargetProfitUsd: 0.10,
     cycleTakeProfitDelta: 0.08,
     cycleStopLossDelta: 0.08,
@@ -197,3 +199,19 @@ export const STRATEGY_VARIANTS = [
     crossMarketRequired: false
   }
 ];
+
+export function isVariantLiveExecutionAllowed(variant) {
+  return !Boolean(variant?.shadowOnly) && !Boolean(variant?.reversalEnabled);
+}
+
+const cheap15mMain = STRATEGY_VARIANTS.find((variant) => variant.key === "cheap_15m_tp35");
+if (cheap15mMain) {
+  STRATEGY_VARIANTS.push({
+    ...cheap15mMain,
+    key: "cheap_15m_tp35_down_shadow",
+    label: "Cheap Revert 15m (shadow DOWN / sem recovery)",
+    entrySidePolicy: "DOWN_ONLY",
+    shadowOnly: true,
+    cycleMaxSteps: 1
+  });
+}

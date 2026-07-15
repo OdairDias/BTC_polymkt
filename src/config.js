@@ -1,4 +1,4 @@
-import { STRATEGY_VARIANTS } from "./strategy/variants.js";
+import { isVariantLiveExecutionAllowed, STRATEGY_VARIANTS } from "./strategy/variants.js";
 
 /**
  * Valores padrão da aplicação (BTC 5m + estratégia paper).
@@ -137,6 +137,14 @@ function sanitizeSizingMode(value, fallback = "fixed") {
   return s === "fixed" || s === "kelly" ? s : fallback;
 }
 
+function sanitizeEntrySidePolicy(value, fallback = "BOTH") {
+  const normalize = (candidate) => {
+    const s = String(candidate ?? "").trim().toUpperCase();
+    return s === "UP_ONLY" || s === "DOWN_ONLY" || s === "BOTH" ? s : null;
+  };
+  return normalize(value) ?? normalize(fallback) ?? "BOTH";
+}
+
 function sanitizeTakeProfitLevels(levels, fallback = [], fallbackPrice = null) {
   const source = Array.isArray(levels) ? levels : Array.isArray(fallback) ? fallback : [];
   const cleaned = source
@@ -254,6 +262,8 @@ function mergeStrategyVariant(base, candidate) {
     enabled: c.enabled === undefined ? true : Boolean(c.enabled),
     decisionMode: String(c.decisionMode ?? base.decisionMode ?? "sniper_v2"),
     contrarian: c.contrarian === undefined ? false : Boolean(c.contrarian),
+    entrySidePolicy: sanitizeEntrySidePolicy(c.entrySidePolicy, base.entrySidePolicy),
+    shadowOnly: c.shadowOnly === undefined ? Boolean(base.shadowOnly) : Boolean(c.shadowOnly),
     entryMinutesLeft: Math.max(0.05, Number(c.entryMinutesLeft ?? base.entryMinutesLeft)),
     targetEntryPrice: Math.max(0.01, Number(c.targetEntryPrice ?? base.targetEntryPrice)),
     priceEpsilon: Math.max(0, Number(c.priceEpsilon ?? base.priceEpsilon)),
@@ -689,9 +699,34 @@ const byKey = new Map();
 for (const v of codeVariants) {
   byKey.set(v.key, mergeStrategyVariant(baseVariant, v));
 }
-// 2. Se houver override no env, ele sobrescreve a variante de mesmo key
+// 2. Se houver override no env, ele altera pontualmente a variante de mesmo key
 for (const v of variantsFromEnv) {
-  byKey.set(sanitizeStrategyVariantKey(v.key, "override"), mergeStrategyVariant(baseVariant, v));
+  const key = sanitizeStrategyVariantKey(v.key, "override");
+  const current = byKey.get(key) ?? baseVariant;
+  byKey.set(key, mergeStrategyVariant(current, { ...v, key }));
+}
+// Contratos direcionais/risk-critical não podem ser afrouxados por override de ambiente.
+for (const [key, variant] of byKey.entries()) {
+  if (key.endsWith("_shadow")) {
+    byKey.set(key, { ...variant, shadowOnly: true });
+  }
+  if (key === "cheap_15m_tp35") {
+    byKey.set(key, {
+      ...byKey.get(key),
+      entrySidePolicy: "UP_ONLY",
+      reversalEnabled: true,
+      cycleMaxSteps: 1
+    });
+  }
+  if (key === "cheap_15m_tp35_down_shadow") {
+    byKey.set(key, {
+      ...byKey.get(key),
+      entrySidePolicy: "DOWN_ONLY",
+      shadowOnly: true,
+      reversalEnabled: true,
+      cycleMaxSteps: 1
+    });
+  }
 }
 // 3. Se não tiver nenhuma variante de nenhum lado, usa o default antigo
 if (byKey.size === 0) {
@@ -700,6 +735,7 @@ if (byKey.size === 0) {
 
 CONFIG.strategy.variants = Array.from(byKey.values()).filter(v => v.enabled !== false);
 const liveKeyCandidate = sanitizeStrategyVariantKey(envString("STRATEGY_LIVE_STRATEGY_KEY", "sniper_45s"), "sniper_45s");
-CONFIG.strategy.liveStrategyKey = byKey.has(liveKeyCandidate)
+const liveCandidateVariant = byKey.get(liveKeyCandidate);
+CONFIG.strategy.liveStrategyKey = liveCandidateVariant && liveCandidateVariant.enabled !== false && isVariantLiveExecutionAllowed(liveCandidateVariant)
   ? liveKeyCandidate
-  : (CONFIG.strategy.variants[0]?.key ?? "sniper_45s");
+  : "__live_disabled__";

@@ -114,6 +114,19 @@ export async function findActivePaperCycle(client, { strategyKey = "default" }) 
   return res.rows[0] ?? null;
 }
 
+export async function capPaperCycleMaxSteps(client, { cycleId, configuredMaxSteps }) {
+  const safeMaxSteps = Math.max(1, Math.floor(Number(configuredMaxSteps) || 1));
+  const res = await client.query(
+    `UPDATE strategy_paper_cycles
+        SET max_steps = LEAST(max_steps, $2),
+            updated_at = now()
+      WHERE id = $1
+      RETURNING max_steps`,
+    [cycleId, safeMaxSteps]
+  );
+  return Number(res.rows[0]?.max_steps ?? safeMaxSteps);
+}
+
 export async function createPaperCycle(client, payload) {
   const res = await client.query(
     `INSERT INTO strategy_paper_cycles (

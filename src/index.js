@@ -408,6 +408,9 @@ function describeStrategyVariant(variant) {
   return [
     variant.key,
     `mode=${variant.decisionMode}`,
+    `sidePolicy=${variant.entrySidePolicy ?? "BOTH"}`,
+    variant.shadowOnly ? "shadowOnly=true" : null,
+    variant.reversalEnabled ? `cycleSteps=${variant.cycleMaxSteps ?? 1}` : null,
     marketRef,
     `entry=${variant.entryMinutesLeft}m`,
     variant.grossProfitTargetUsd ? `gp=$${variant.grossProfitTargetUsd}` : null,
