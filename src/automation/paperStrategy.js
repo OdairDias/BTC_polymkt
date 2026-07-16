@@ -24,6 +24,7 @@ import { applyEntrySidePolicy, decideLateWindowSide } from "../strategy/lateWind
 import { computeRealizedExitPnl } from "../strategy/outcomeInfer.js";
 import {
   applyPaperExecutionPrice,
+  finalizeExecutablePaperEntry,
   normalizePaperFillMode,
   resolvePaperBuyReferencePrice
 } from "../strategy/executionModel.js";
@@ -2166,8 +2167,16 @@ export async function runPaperStrategyTick({
           poly,
           executionConfig: paperExecution
         });
-        if (modeledEntryPrice != null) {
-          entryPrice = modeledEntryPrice;
+        const finalizedEntry = finalizeExecutablePaperEntry({
+          decision: effectiveDecision,
+          modeledEntryPrice
+        });
+        effectiveDecision = finalizedEntry.decision;
+        entryPrice = finalizedEntry.entryPrice;
+        if (entryPrice == null) {
+          simulatedShares = null;
+          sizingDetails = null;
+          localLiveLine = `${ANSI_GRAY}[${key}] skip: sem ask executável para entrada paper${ANSI_RESET}`;
         }
       }
 

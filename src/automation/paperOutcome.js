@@ -31,6 +31,16 @@ export function resetOutcomeTrailForTests() {
   // Mantido por compatibilidade com testes antigos.
 }
 
+export function formatOfficialOutcomeLine({ strategyKey, winLabel, entryCorrect, pnl, extraPrice = "" }) {
+  if (entryCorrect === true && pnl != null) {
+    return `${ANSI_GREEN}[${strategyKey}] Outcome oficial: ${winLabel} won · entrada OK · PnL ~$${Number(pnl).toFixed(2)}${extraPrice}${ANSI_RESET}`;
+  }
+  if (entryCorrect === false && pnl != null) {
+    return `${ANSI_RED}[${strategyKey}] Outcome oficial: ${winLabel} won · entrada errou · PnL ~$${Number(pnl).toFixed(2)}${extraPrice}${ANSI_RESET}`;
+  }
+  return `${ANSI_GRAY}[${strategyKey}] Outcome oficial: ${winLabel}${extraPrice}${ANSI_RESET}`;
+}
+
 /**
  * Grava resultado oficial da Gamma API para entradas pendentes jÃ¡ encerradas.
  * NÃ£o infere mais vencedor por mids nos Ãºltimos segundos.
@@ -180,19 +190,14 @@ export async function runPaperOutcomeTick() {
       if (!inserted) continue;
 
       insertedCount += 1;
+      const pnl = accounting?.pnl ?? null;
       const winLabel = resolved.winnerLabel ?? resolved.winner ?? "?";
       const extraPrice =
         resolved.priceToBeat != null && resolved.priceAtClose != null
           ? ` | beat ${Number(resolved.priceToBeat).toFixed(2)} vs close ${Number(resolved.priceAtClose).toFixed(2)}`
           : "";
 
-      if (entryCorrect === true && pnl != null) {
-        lastLine = `${ANSI_GREEN}[${strategyKey}] Outcome oficial: ${winLabel} won Â· entrada OK Â· PnL ~$${pnl.toFixed(2)}${extraPrice}${ANSI_RESET}`;
-      } else if (entryCorrect === false && pnl != null) {
-        lastLine = `${ANSI_RED}[${strategyKey}] Outcome oficial: ${winLabel} won Â· entrada errou Â· PnL ~$${pnl.toFixed(2)}${extraPrice}${ANSI_RESET}`;
-      } else {
-        lastLine = `${ANSI_GRAY}[${strategyKey}] Outcome oficial: ${winLabel}${extraPrice}${ANSI_RESET}`;
-      }
+      lastLine = formatOfficialOutcomeLine({ strategyKey, winLabel, entryCorrect, pnl, extraPrice });
     }
 
     if (insertedCount === 0) return { line: null };

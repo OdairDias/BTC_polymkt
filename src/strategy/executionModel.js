@@ -19,6 +19,17 @@ export function resolvePaperBuyReferencePrice({ quotePrice, bestAsk }) {
   return clampPrice01(Math.max(quote, ask));
 }
 
+export function finalizeExecutablePaperEntry({ decision, modeledEntryPrice }) {
+  const price = toFinite(modeledEntryPrice);
+  if (price == null || price <= 0) {
+    return {
+      decision: { ...decision, side: null, result: "SKIP_NO_EXECUTABLE_ASK" },
+      entryPrice: null
+    };
+  }
+  return { decision, entryPrice: clampPrice01(price) };
+}
+
 export function computeTakerFeeUsd({ shares, price, feeRate = 0 }) {
   const quantity = toFinite(shares);
   const p = toFinite(price);

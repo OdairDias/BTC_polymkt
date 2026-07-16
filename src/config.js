@@ -751,6 +751,28 @@ for (const [key, variant] of byKey.entries()) {
     });
   }
 }
+
+// Fase de refinamento H1: allowlist final e paper-only, aplicada depois de qualquer override de ambiente.
+const H1_REFINEMENT_KEY = "cheap_1h_exec_v2";
+for (const [key, variant] of byKey.entries()) {
+  if (key !== H1_REFINEMENT_KEY) {
+    byKey.set(key, { ...variant, enabled: false });
+    continue;
+  }
+  byKey.set(key, {
+    ...variant,
+    enabled: true,
+    shadowOnly: true,
+    reversalEnabled: false,
+    marketWindowMinutes: 60,
+    marketSeriesId: "10114",
+    marketSeriesSlug: "btc-up-or-down-hourly",
+    crossMarketWindowMinutes: 15,
+    crossMarketSeriesId: "10192",
+    crossMarketSeriesSlug: "btc-up-or-down-15m"
+  });
+}
+
 // 3. Se não tiver nenhuma variante de nenhum lado, usa o default antigo
 if (byKey.size === 0) {
   byKey.set("default", baseVariant);

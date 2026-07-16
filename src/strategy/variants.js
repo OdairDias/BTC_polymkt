@@ -209,6 +209,7 @@ if (cheap1hLegacy) {
     key: "cheap_1h_exec_v2",
     label: "Cheap Revert 1h Exec V2 (ask + slippage + crypto taker fees)",
     enabled: true,
+    shadowOnly: true,
     paperFillMode: "pessimistic",
     paperEntrySlippageBps: 25,
     paperExitSlippageBps: 35,

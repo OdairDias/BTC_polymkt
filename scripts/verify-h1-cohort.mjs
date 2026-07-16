@@ -2,6 +2,7 @@ import pg from "pg";
 
 const { Pool } = pg;
 const strategyKey = process.env.H1_COHORT_KEY || "cheap_1h_exec_v2";
+const minimumPricedOutcomes = Math.max(1, Math.floor(Number(process.env.H1_MIN_PRICED_OUTCOMES) || 30));
 const databaseUrl = process.env.DATABASE_URL || process.env.STRATEGY_DATABASE_URL;
 
 if (!databaseUrl) {
@@ -95,6 +96,7 @@ try {
   const report = { strategy_key: strategyKey };
   for (const key of integerKeys) report[key] = Number(raw[key] || 0);
   for (const key of numericKeys) report[key] = Number(raw[key] || 0);
+  report.minimum_priced_outcomes = minimumPricedOutcomes;
   report.cohort_started_at = raw.cohort_started_at || null;
   report.last_entry_at = raw.last_entry_at || null;
 
@@ -109,7 +111,17 @@ try {
     "exit_above_bid"
   ].filter((key) => report[key] > 0);
 
-  report.status = violations.length ? "fail" : report.entries === 0 ? "awaiting_samples" : "pass";
+  if (violations.length) {
+    report.status = "fail";
+  } else if (report.entries === 0) {
+    report.status = "awaiting_samples";
+  } else if (report.priced_outcomes === 0) {
+    report.status = "awaiting_outcomes";
+  } else if (report.priced_outcomes < minimumPricedOutcomes) {
+    report.status = "collecting_samples";
+  } else {
+    report.status = "pass";
+  }
   report.violations = violations;
   console.log(JSON.stringify(report, null, 2));
   if (violations.length) process.exitCode = 1;
