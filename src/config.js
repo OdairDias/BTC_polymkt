@@ -57,6 +57,7 @@ const DEFAULTS = {
     paperEntrySlippageBps: 20,
     paperExitSlippageBps: 25,
     paperSpreadPenaltyFactor: 0.25,
+    paperTakerFeeRate: 0.07,
     maxOracleLagMs: 0,
     maxBinanceLagMs: 0,
     maxSnapshotAgeMs: 0,
@@ -223,6 +224,7 @@ function mergeStrategyVariant(base, candidate) {
   const paperEntrySlippageBps = Number(c.paperEntrySlippageBps ?? base.paperEntrySlippageBps);
   const paperExitSlippageBps = Number(c.paperExitSlippageBps ?? base.paperExitSlippageBps);
   const paperSpreadPenaltyFactor = Number(c.paperSpreadPenaltyFactor ?? base.paperSpreadPenaltyFactor);
+  const paperTakerFeeRate = Number(c.paperTakerFeeRate ?? base.paperTakerFeeRate);
   const maxOracleLagMs = Number(c.maxOracleLagMs ?? base.maxOracleLagMs);
   const maxBinanceLagMs = Number(c.maxBinanceLagMs ?? base.maxBinanceLagMs);
   const maxSnapshotAgeMs = Number(c.maxSnapshotAgeMs ?? base.maxSnapshotAgeMs);
@@ -318,6 +320,10 @@ function mergeStrategyVariant(base, candidate) {
     paperSpreadPenaltyFactor:
       Number.isFinite(paperSpreadPenaltyFactor) && paperSpreadPenaltyFactor >= 0
         ? Math.max(0, paperSpreadPenaltyFactor)
+        : 0,
+    paperTakerFeeRate:
+      Number.isFinite(paperTakerFeeRate) && paperTakerFeeRate >= 0
+        ? Math.max(0, paperTakerFeeRate)
         : 0,
     maxOracleLagMs:
       Number.isFinite(maxOracleLagMs) && maxOracleLagMs > 0
@@ -550,6 +556,10 @@ export const CONFIG = {
       0,
       Number(process.env.STRATEGY_PAPER_SPREAD_PENALTY_FACTOR) || DEFAULTS.strategy.paperSpreadPenaltyFactor
     ),
+    paperTakerFeeRate: Math.max(
+      0,
+      Number(process.env.STRATEGY_PAPER_TAKER_FEE_RATE) || DEFAULTS.strategy.paperTakerFeeRate
+    ),
     maxOracleLagMs: Math.max(
       0,
       Math.floor(Number(process.env.STRATEGY_MAX_ORACLE_LAG_MS) || DEFAULTS.strategy.maxOracleLagMs)
@@ -661,6 +671,7 @@ const baseVariant = {
   paperEntrySlippageBps: CONFIG.strategy.paperEntrySlippageBps,
   paperExitSlippageBps: CONFIG.strategy.paperExitSlippageBps,
   paperSpreadPenaltyFactor: CONFIG.strategy.paperSpreadPenaltyFactor,
+  paperTakerFeeRate: CONFIG.strategy.paperTakerFeeRate,
   maxOracleLagMs: CONFIG.strategy.maxOracleLagMs,
   maxBinanceLagMs: CONFIG.strategy.maxBinanceLagMs,
   maxSnapshotAgeMs: CONFIG.strategy.maxSnapshotAgeMs,

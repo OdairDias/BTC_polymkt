@@ -172,7 +172,7 @@ The bot supports HTTP(S) proxies for both HTTP requests (fetch) and WebSocket co
 - Se quiser expor o dashboard fora do host, defina **os dois**:
   - `DASHBOARD_BASIC_AUTH_USER`
   - `DASHBOARD_BASIC_AUTH_PASSWORD`
-- Deploy supervisionado por `systemd --user`: ver `deploy/README.md` e `deploy/systemd/btc-polymkt-paper.service`.
+- Deploy supervisionado por `systemd --user`: ver `deploy/README.md` e `deploy/systemd/btc-polymkt-h1-paper.service`.
 
 Supported env vars (standard):
 

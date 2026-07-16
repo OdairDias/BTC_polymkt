@@ -11,6 +11,24 @@ function toFinite(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+export function resolvePaperBuyReferencePrice({ quotePrice, bestAsk }) {
+  const quote = toFinite(quotePrice);
+  const ask = toFinite(bestAsk);
+  if (ask == null || ask <= 0) return null;
+  if (quote == null || quote <= 0) return clampPrice01(ask);
+  return clampPrice01(Math.max(quote, ask));
+}
+
+export function computeTakerFeeUsd({ shares, price, feeRate = 0 }) {
+  const quantity = toFinite(shares);
+  const p = toFinite(price);
+  const rate = toFinite(feeRate);
+  if (quantity == null || quantity <= 0 || p == null || p <= 0 || p >= 1 || rate == null || rate <= 0) {
+    return 0;
+  }
+  return Math.round(quantity * rate * p * (1 - p) * 100_000) / 100_000;
+}
+
 export function normalizePaperFillMode(value, fallback = "pessimistic") {
   const mode = String(value ?? "").trim().toLowerCase();
   if (mode === "optimistic" || mode === "pessimistic") return mode;

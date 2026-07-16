@@ -55,6 +55,8 @@ export async function runPaperOutcomeTick() {
       const marketSlug = String(entry.market_slug ?? "");
       if (!marketSlug) continue;
 
+      const variant = s.variants.find((candidate) => candidate.key === strategyKey);
+      const takerFeeRate = Math.max(0, Number(variant?.paperTakerFeeRate ?? s.paperTakerFeeRate) || 0);
       const chosen = entry.chosen_side;
       const remainingNotionalUsd = Number(entry.remaining_notional_usd ?? entry.notional_usd ?? 0);
       const remainingShares = Number(entry.remaining_shares ?? entry.simulated_shares ?? 0);
@@ -118,16 +120,17 @@ export async function runPaperOutcomeTick() {
       if (!resolved.resolved || !resolved.winner) continue;
 
       let entryCorrect = null;
-      let pnl = null;
+      let accounting = null;
       if ((chosen === "UP" || chosen === "DOWN") && remainingNotionalUsd > 0) {
-        const r = computeSimulatedPnl({
+        accounting = computeSimulatedPnl({
           chosenSide: chosen,
           winnerSide: resolved.winner,
           entryPrice: entry.entry_price,
-          notionalUsd: remainingNotionalUsd
+          notionalUsd: remainingNotionalUsd,
+          shares: remainingShares,
+          takerFeeRate
         });
-        entryCorrect = r.entryCorrect;
-        pnl = r.pnl;
+        entryCorrect = accounting.entryCorrect;
       }
 
       const { inserted } = await insertPaperOutcome(client, {
@@ -156,7 +159,11 @@ export async function runPaperOutcomeTick() {
         official_price_at_close: resolved.priceAtClose,
         entry_chosen_side: chosen,
         entry_correct: entryCorrect,
-        pnl_simulated_usd: pnl,
+        pnl_simulated_usd: accounting?.pnl ?? null,
+        gross_pnl_simulated_usd: accounting?.grossPnl ?? null,
+        entry_fee_usd: accounting?.entryFeeUsd ?? null,
+        exit_fee_usd: 0,
+        total_fee_usd: accounting?.totalFeeUsd ?? null,
         dry_run: s.dryRun,
         exit_sequence: nextExitSequence,
         fraction_exited:

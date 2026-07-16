@@ -72,7 +72,7 @@ export const STRATEGY_VARIANTS = [
   {
     key: "cheap_15m_tp35",
     label: "Cheap Revert 15m (TP 0.55 / sem GP fixo / edge 0.05 + micro)",
-    enabled: true,
+    enabled: false,
     decisionMode: "cheap_revert",
     entrySidePolicy: "UP_ONLY",
     shadowOnly: false,
@@ -176,6 +176,7 @@ export const STRATEGY_VARIANTS = [
     paperEntrySlippageBps: 25,
     paperExitSlippageBps: 35,
     paperSpreadPenaltyFactor: 0.20,
+    paperTakerFeeRate: 0.07,
     maxOracleLagMs: 20000,
     maxBinanceLagMs: 6000,
     maxSnapshotAgeMs: 4000,
@@ -199,6 +200,21 @@ export const STRATEGY_VARIANTS = [
     crossMarketRequired: false
   }
 ];
+
+const cheap1hLegacy = STRATEGY_VARIANTS.find((variant) => variant.key === "cheap_1h_tp45");
+if (cheap1hLegacy) {
+  STRATEGY_VARIANTS.push({
+    ...cheap1hLegacy,
+    key: "cheap_1h_exec_v2",
+    label: "Cheap Revert 1h Exec V2 (ask + slippage + crypto taker fees)",
+    enabled: true,
+    paperFillMode: "pessimistic",
+    paperEntrySlippageBps: 25,
+    paperExitSlippageBps: 35,
+    paperSpreadPenaltyFactor: 0.20,
+    paperTakerFeeRate: 0.07
+  });
+}
 
 export function isVariantLiveExecutionAllowed(variant) {
   return !Boolean(variant?.shadowOnly) && !Boolean(variant?.reversalEnabled);

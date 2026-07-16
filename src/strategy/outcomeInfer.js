@@ -1,3 +1,5 @@
+import { computeTakerFeeUsd } from "./executionModel.js";
+
 /**
  * Infere vencedor do mercado binário a partir dos mids (últimos segundos: um lado ~1, outro ~0).
  */
@@ -29,44 +31,61 @@ export function normalizeBinarySide(value) {
 /**
  * PnL simulado: compra a entryPrice com notional US$; se vence, shares * 1 - custo; se perde, -notional.
  */
-export function computeSimulatedPnl({ chosenSide, winnerSide, entryPrice, notionalUsd }) {
+export function computeSimulatedPnl({ chosenSide, winnerSide, entryPrice, notionalUsd, shares = null, takerFeeRate = 0 }) {
   const normalizedChosenSide = normalizeBinarySide(chosenSide);
   const normalizedWinnerSide = normalizeBinarySide(winnerSide);
 
   if (!normalizedChosenSide || !normalizedWinnerSide) {
-    return { pnl: null, entryCorrect: null };
+    return { pnl: null, grossPnl: null, entryCorrect: null, shares: null, entryFeeUsd: null, totalFeeUsd: null };
   }
   if (!entryPrice || !Number.isFinite(Number(entryPrice)) || Number(entryPrice) <= 0) {
-    return { pnl: null, entryCorrect: null };
+    return { pnl: null, grossPnl: null, entryCorrect: null, shares: null, entryFeeUsd: null, totalFeeUsd: null };
   }
   const notional = Number(notionalUsd) || 0;
   const p = Number(entryPrice);
-  const shares = notional / p;
+  const explicitShares = Number(shares);
+  const effectiveShares = Number.isFinite(explicitShares) && explicitShares > 0 ? explicitShares : notional / p;
+  const entryNotional = effectiveShares * p;
+  const entryFeeUsd = computeTakerFeeUsd({ shares: effectiveShares, price: p, feeRate: takerFeeRate });
   const win = normalizedChosenSide === normalizedWinnerSide;
-  if (win) {
-    const payout = shares * 1;
-    return { pnl: payout - notional, entryCorrect: true };
-  }
-  return { pnl: -notional, entryCorrect: false };
+  const grossPnl = win ? effectiveShares - entryNotional : -entryNotional;
+  return {
+    pnl: grossPnl - entryFeeUsd,
+    grossPnl,
+    entryCorrect: win,
+    shares: effectiveShares,
+    entryFeeUsd,
+    totalFeeUsd: entryFeeUsd
+  };
 }
 
 /**
  * PnL realizado em saída antecipada:
  * compra shares = notional / entryPrice e vende shares * exitPrice.
  */
-export function computeRealizedExitPnl({ entryPrice, exitPrice, notionalUsd }) {
+export function computeRealizedExitPnl({ entryPrice, exitPrice, notionalUsd, shares = null, takerFeeRate = 0 }) {
   const entry = Number(entryPrice);
   const exit = Number(exitPrice);
   const notional = Number(notionalUsd) || 0;
 
   if (!Number.isFinite(entry) || entry <= 0 || !Number.isFinite(exit) || exit <= 0) {
-    return { pnl: null, shares: null };
+    return { pnl: null, grossPnl: null, shares: null, entryFeeUsd: null, exitFeeUsd: null, totalFeeUsd: null };
   }
 
-  const shares = notional / entry;
-  const proceeds = shares * exit;
+  const explicitShares = Number(shares);
+  const effectiveShares = Number.isFinite(explicitShares) && explicitShares > 0 ? explicitShares : notional / entry;
+  const entryNotional = effectiveShares * entry;
+  const proceeds = effectiveShares * exit;
+  const grossPnl = proceeds - entryNotional;
+  const entryFeeUsd = computeTakerFeeUsd({ shares: effectiveShares, price: entry, feeRate: takerFeeRate });
+  const exitFeeUsd = computeTakerFeeUsd({ shares: effectiveShares, price: exit, feeRate: takerFeeRate });
+  const totalFeeUsd = entryFeeUsd + exitFeeUsd;
   return {
-    pnl: proceeds - notional,
-    shares
+    pnl: grossPnl - totalFeeUsd,
+    grossPnl,
+    shares: effectiveShares,
+    entryFeeUsd,
+    exitFeeUsd,
+    totalFeeUsd
   };
 }

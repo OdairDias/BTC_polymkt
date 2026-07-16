@@ -8,9 +8,11 @@
   },
   "scripts": {
     "start": "node src/index.js",
+    "test": "node --test tests/*.test.js",
     "test:creds": "node scripts/test-polymarket-creds.mjs",
     "cron:eval": "node scripts/cron-strategy-eval-function.mjs",
     "report:strategy": "node scripts/report-strategy.mjs",
+    "verify:h1": "node scripts/verify-h1-cohort.mjs",
     "walkforward:strategy": "node scripts/walkforward-strategy.mjs",
     "train:model": "node scripts/train-probability-model.mjs"
   },

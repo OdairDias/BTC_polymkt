@@ -79,6 +79,10 @@ export async function ensureStrategySchema(client) {
       entry_chosen_side TEXT,
       entry_correct BOOLEAN,
       pnl_simulated_usd NUMERIC,
+      gross_pnl_simulated_usd NUMERIC,
+      entry_fee_usd NUMERIC,
+      exit_fee_usd NUMERIC,
+      total_fee_usd NUMERIC,
       dry_run BOOLEAN NOT NULL DEFAULT true,
       exit_price NUMERIC,
       exit_reason TEXT,
@@ -149,6 +153,10 @@ export async function ensureStrategySchema(client) {
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_outcome_prices_json JSONB;
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_to_beat NUMERIC;
     ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_price_at_close NUMERIC;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS gross_pnl_simulated_usd NUMERIC;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS entry_fee_usd NUMERIC;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS exit_fee_usd NUMERIC;
+    ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS total_fee_usd NUMERIC;
     
     -- Marco 0: Instrumentação Profissional
     ALTER TABLE strategy_paper_signals ADD COLUMN IF NOT EXISTS oracle_price NUMERIC;
@@ -749,10 +757,11 @@ export async function insertPaperOutcome(client, row) {
       up_mid, down_mid, up_best_bid, up_best_ask, down_best_bid, down_best_ask,
       inferred_winner, official_winner, outcome_code, official_resolution_status, official_resolution_source,
       official_resolved_at, official_outcome_prices_json, official_price_to_beat, official_price_at_close,
-      entry_chosen_side, entry_correct, pnl_simulated_usd, dry_run, exit_price, exit_reason, exited_early,
+      entry_chosen_side, entry_correct, pnl_simulated_usd, gross_pnl_simulated_usd,
+      entry_fee_usd, exit_fee_usd, total_fee_usd, dry_run, exit_price, exit_reason, exited_early,
       exit_sequence, fraction_exited, shares_exited, notional_exited_usd, remaining_shares, remaining_notional_usd,
       is_final_exit
-    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34)
+    ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38)
     ON CONFLICT (entry_id, exit_sequence) DO NOTHING
     RETURNING id`,
     [
@@ -779,6 +788,10 @@ export async function insertPaperOutcome(client, row) {
       row.entry_chosen_side ?? null,
       row.entry_correct ?? null,
       row.pnl_simulated_usd ?? null,
+      row.gross_pnl_simulated_usd ?? null,
+      row.entry_fee_usd ?? null,
+      row.exit_fee_usd ?? null,
+      row.total_fee_usd ?? null,
       row.dry_run,
       row.exit_price ?? null,
       row.exit_reason ?? null,

@@ -1,5 +1,5 @@
 [Unit]
-Description=BTC Polymarket papertrade bot
+Description=BTC Polymarket H1 refined paper bot
 After=network-online.target
 Wants=network-online.target
 

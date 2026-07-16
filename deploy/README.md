@@ -4,23 +4,23 @@
 
 Arquivos:
 - `scripts/run_vps_paper.sh`
-- `deploy/systemd/btc-polymkt-paper.service`
+- `deploy/systemd/btc-polymkt-h1-paper.service`
 
 Instalação:
 
 ```bash
 chmod +x /home/hermes/projects/BTC_polymkt/scripts/run_vps_paper.sh
 mkdir -p ~/.config/systemd/user
-cp /home/hermes/projects/BTC_polymkt/deploy/systemd/btc-polymkt-paper.service ~/.config/systemd/user/
+cp /home/hermes/projects/BTC_polymkt/deploy/systemd/btc-polymkt-h1-paper.service ~/.config/systemd/user/
 systemctl --user daemon-reload
-systemctl --user enable --now btc-polymkt-paper.service
+systemctl --user enable --now btc-polymkt-h1-paper.service
 ```
 
 Verificações:
 
 ```bash
-systemctl --user status btc-polymkt-paper.service --no-pager
-journalctl --user -u btc-polymkt-paper.service -n 50 --no-pager
+systemctl --user status btc-polymkt-h1-paper.service --no-pager
+journalctl --user -u btc-polymkt-h1-paper.service -n 50 --no-pager
 ss -ltnp | grep ':9090'
 curl -s http://127.0.0.1:9090/api/status
 ```

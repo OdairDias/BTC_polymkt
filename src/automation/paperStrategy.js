@@ -22,7 +22,11 @@ import {
 } from "../db/postgresReversalCycle.js";
 import { applyEntrySidePolicy, decideLateWindowSide } from "../strategy/lateWindow.js";
 import { computeRealizedExitPnl } from "../strategy/outcomeInfer.js";
-import { applyPaperExecutionPrice, normalizePaperFillMode } from "../strategy/executionModel.js";
+import {
+  applyPaperExecutionPrice,
+  normalizePaperFillMode,
+  resolvePaperBuyReferencePrice
+} from "../strategy/executionModel.js";
 import { midFromBook } from "../strategy/pricing.js";
 import { chooseStrategyNotional } from "../strategy/sizing.js";
 import { isVariantLiveExecutionAllowed } from "../strategy/variants.js";
@@ -132,6 +136,7 @@ function buildVariantConfigHash(variant) {
       paperEntrySlippageBps: variant?.paperEntrySlippageBps ?? null,
       paperExitSlippageBps: variant?.paperExitSlippageBps ?? null,
       paperSpreadPenaltyFactor: variant?.paperSpreadPenaltyFactor ?? null,
+      paperTakerFeeRate: variant?.paperTakerFeeRate ?? null,
       maxOracleLagMs: variant?.maxOracleLagMs ?? null,
       maxBinanceLagMs: variant?.maxBinanceLagMs ?? null,
       maxSnapshotAgeMs: variant?.maxSnapshotAgeMs ?? null,
@@ -712,6 +717,10 @@ async function recordPaperExitOutcome(client, {
   exitPrice,
   exitReason,
   realizedPnl,
+  grossPnl,
+  entryFeeUsd,
+  exitFeeUsd,
+  totalFeeUsd,
   entryCorrect,
   exitSequence,
   fractionExited,
@@ -745,6 +754,10 @@ async function recordPaperExitOutcome(client, {
     entry_chosen_side: state.side,
     entry_correct: entryCorrect,
     pnl_simulated_usd: realizedPnl,
+    gross_pnl_simulated_usd: grossPnl,
+    entry_fee_usd: entryFeeUsd,
+    exit_fee_usd: exitFeeUsd,
+    total_fee_usd: totalFeeUsd,
     dry_run: dryRun,
     exit_price: exitPrice,
     exit_reason: exitReason,
@@ -836,15 +849,21 @@ function getPaperExecutionConfig(variant) {
     fillMode: normalizePaperFillMode(variant?.paperFillMode ?? CONFIG.strategy.paperFillMode, "pessimistic"),
     entrySlippageBps: Math.max(0, Number(variant?.paperEntrySlippageBps ?? CONFIG.strategy.paperEntrySlippageBps) || 0),
     exitSlippageBps: Math.max(0, Number(variant?.paperExitSlippageBps ?? CONFIG.strategy.paperExitSlippageBps) || 0),
-    spreadPenaltyFactor: Math.max(0, Number(variant?.paperSpreadPenaltyFactor ?? CONFIG.strategy.paperSpreadPenaltyFactor) || 0)
+    spreadPenaltyFactor: Math.max(0, Number(variant?.paperSpreadPenaltyFactor ?? CONFIG.strategy.paperSpreadPenaltyFactor) || 0),
+    takerFeeRate: Math.max(0, Number(variant?.paperTakerFeeRate ?? CONFIG.strategy.paperTakerFeeRate) || 0)
   };
 }
 
 function applyPaperEntryPrice({ basePrice, side, poly, executionConfig }) {
   const spread = computeBookSpread(sideBook(poly, side));
+  const referencePrice = resolvePaperBuyReferencePrice({
+    quotePrice: basePrice,
+    bestAsk: sideBook(poly, side)?.bestAsk
+  });
+  if (referencePrice == null) return null;
   return applyPaperExecutionPrice({
     action: "buy",
-    referencePrice: basePrice,
+    referencePrice,
     spread,
     fillMode: executionConfig.fillMode,
     slippageBps: executionConfig.entrySlippageBps,
@@ -1078,10 +1097,12 @@ export async function runPaperStrategyTick({
             await client.query('BEGIN');
             try {
               const realized = computeRealizedExitPnl({
-              entryPrice: activeReversalCycle.leg_entry_price,
-              exitPrice: executableBidPrice,
-              notionalUsd: activeReversalCycle.leg_notional_usd
-            });
+                entryPrice: activeReversalCycle.leg_entry_price,
+                exitPrice: executableBidPrice,
+                notionalUsd: activeReversalCycle.leg_notional_usd,
+                shares: activeReversalCycle.leg_shares,
+                takerFeeRate: paperExecution.takerFeeRate
+              });
             const exitReason = tpHit ? "TAKE_PROFIT" : stopHit ? "STOP_LOSS" : "TIME_EXIT";
             const exitStatus = tpHit ? "TAKE_PROFIT" : stopHit ? "STOPPED" : "TIME_EXIT";
             await closePaperCycleLeg(client, {
@@ -1116,6 +1137,10 @@ export async function runPaperStrategyTick({
                 entry_chosen_side: heldSide,
                 entry_correct: realized.pnl > 0 ? true : realized.pnl < 0 ? false : null,
                 pnl_simulated_usd: realized.pnl,
+                gross_pnl_simulated_usd: realized.grossPnl,
+                entry_fee_usd: realized.entryFeeUsd,
+                exit_fee_usd: realized.exitFeeUsd,
+                total_fee_usd: realized.totalFeeUsd,
                 dry_run: s.dryRun,
                 exit_price: executableBidPrice,
                 exit_reason: exitReason,
@@ -1387,7 +1412,9 @@ export async function runPaperStrategyTick({
               const realized = computeRealizedExitPnl({
                 entryPrice: levelState.entryPrice,
                 exitPrice: executableTargetPrice,
-                notionalUsd: leg.exitNotionalUsd
+                notionalUsd: leg.exitNotionalUsd,
+                shares: leg.exitShares,
+                takerFeeRate: paperExecution.takerFeeRate
               });
               const entryCorrect =
                 realized.pnl > 0 ? true : realized.pnl < 0 ? false : null;
@@ -1412,6 +1439,10 @@ export async function runPaperStrategyTick({
                 exitPrice: executableTargetPrice,
                 exitReason: "TAKE_PROFIT",
                 realizedPnl: realized.pnl,
+                grossPnl: realized.grossPnl,
+                entryFeeUsd: realized.entryFeeUsd,
+                exitFeeUsd: realized.exitFeeUsd,
+                totalFeeUsd: realized.totalFeeUsd,
                 entryCorrect,
                 exitSequence: progress.exitSequence,
                 fractionExited: leg.fractionExited,
@@ -1456,7 +1487,9 @@ export async function runPaperStrategyTick({
                 const realized = computeRealizedExitPnl({
                   entryPrice: exitState.entryPrice,
                   exitPrice: executableBidPrice,
-                  notionalUsd: fullExitSizing.exitNotionalUsd
+                  notionalUsd: fullExitSizing.exitNotionalUsd,
+                  shares: fullExitSizing.exitShares,
+                  takerFeeRate: paperExecution.takerFeeRate
                 });
                 const entryCorrect = realized.pnl > 0 ? true : realized.pnl < 0 ? false : null;
                 const progress = applyTakeProfitExitToState(paperTakeProfitState, {
@@ -1480,6 +1513,10 @@ export async function runPaperStrategyTick({
                   exitPrice: executableBidPrice,
                   exitReason: "GROSS_PROFIT",
                   realizedPnl: realized.pnl,
+                  grossPnl: realized.grossPnl,
+                  entryFeeUsd: realized.entryFeeUsd,
+                  exitFeeUsd: realized.exitFeeUsd,
+                  totalFeeUsd: realized.totalFeeUsd,
                   entryCorrect,
                   exitSequence: progress.exitSequence,
                   fractionExited: fullExitSizing.fractionExited,
@@ -1504,7 +1541,9 @@ export async function runPaperStrategyTick({
                   const realized = computeRealizedExitPnl({
                     entryPrice: exitState.entryPrice,
                     exitPrice: executableBidPrice,
-                    notionalUsd: fullExitSizing.exitNotionalUsd
+                    notionalUsd: fullExitSizing.exitNotionalUsd,
+                    shares: fullExitSizing.exitShares,
+                    takerFeeRate: paperExecution.takerFeeRate
                   });
                   const entryCorrect = realized.pnl > 0 ? true : realized.pnl < 0 ? false : null;
                   const progress = applyTakeProfitExitToState(paperTakeProfitState, {
@@ -1528,6 +1567,10 @@ export async function runPaperStrategyTick({
                     exitPrice: executableBidPrice,
                     exitReason: "TRAILING_STOP",
                     realizedPnl: realized.pnl,
+                    grossPnl: realized.grossPnl,
+                    entryFeeUsd: realized.entryFeeUsd,
+                    exitFeeUsd: realized.exitFeeUsd,
+                    totalFeeUsd: realized.totalFeeUsd,
                     entryCorrect,
                     exitSequence: progress.exitSequence,
                     fractionExited: fullExitSizing.fractionExited,
@@ -1547,7 +1590,9 @@ export async function runPaperStrategyTick({
                   const realized = computeRealizedExitPnl({
                     entryPrice: exitState.entryPrice,
                     exitPrice: executableBidPrice,
-                    notionalUsd: fullExitSizing.exitNotionalUsd
+                    notionalUsd: fullExitSizing.exitNotionalUsd,
+                    shares: fullExitSizing.exitShares,
+                    takerFeeRate: paperExecution.takerFeeRate
                   });
                   const entryCorrect = realized.pnl > 0 ? true : realized.pnl < 0 ? false : null;
                   const progress = applyTakeProfitExitToState(paperTakeProfitState, {
@@ -1571,6 +1616,10 @@ export async function runPaperStrategyTick({
                     exitPrice: executableBidPrice,
                     exitReason: "TIME_STOP",
                     realizedPnl: realized.pnl,
+                    grossPnl: realized.grossPnl,
+                    entryFeeUsd: realized.entryFeeUsd,
+                    exitFeeUsd: realized.exitFeeUsd,
+                    totalFeeUsd: realized.totalFeeUsd,
                     entryCorrect,
                     exitSequence: progress.exitSequence,
                     fractionExited: fullExitSizing.fractionExited,
