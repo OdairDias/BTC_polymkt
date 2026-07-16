@@ -78,5 +78,9 @@ test("only the refined H1 cohort is enabled", () => {
   assert.equal(h1.paperSpreadPenaltyFactor, 0.20);
   assert.equal(h1.paperTakerFeeRate, 0.07);
   assert.equal(h1.marketWindowMinutes, 60);
+  assert.equal(h1.marketSeriesId, "10114");
   assert.equal(h1.marketSeriesSlug, "btc-up-or-down-hourly");
+  assert.equal(h1.crossMarketWindowMinutes, 15);
+  assert.equal(h1.crossMarketSeriesId, "10192");
+  assert.equal(h1.crossMarketSeriesSlug, "btc-up-or-down-15m");
 });

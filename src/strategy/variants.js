@@ -190,10 +190,11 @@ export const STRATEGY_VARIANTS = [
     liveEntryOrderType: "FAK",
     liveExitOrderType: "FAK",
     marketWindowMinutes: 60,
-    marketSeriesId: "10114",
+    marketSeriesId: "10114", // Gamma: BTC Up or Down Hourly
     marketSeriesSlug: "btc-up-or-down-hourly",
     crossMarketWindowMinutes: 15,
     crossMarketSlugPrefix: "btc-updown-15m",
+    crossMarketSeriesId: "10192", // Gamma: BTC Up or Down 15m
     crossMarketSeriesSlug: "btc-up-or-down-15m",
     crossMarketMaxDivergence: 0.15,
     crossMarketEdgeBonus: 0.02,
