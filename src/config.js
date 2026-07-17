@@ -763,6 +763,8 @@ for (const [key, variant] of byKey.entries()) {
     ...variant,
     enabled: true,
     shadowOnly: true,
+    exitShadowEnabled: true,
+    exitShadowIntervalSeconds: 15,
     reversalEnabled: false,
     marketWindowMinutes: 60,
     marketSeriesId: "10114",

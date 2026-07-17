@@ -30,6 +30,8 @@ import {
 } from "../strategy/executionModel.js";
 import { midFromBook } from "../strategy/pricing.js";
 import { chooseStrategyNotional } from "../strategy/sizing.js";
+import { buildExitShadowSnapshot } from "../strategy/exitShadow.js";
+import { enqueueExitShadowSnapshot } from "../strategy/exitShadowWriter.js";
 import { isVariantLiveExecutionAllowed } from "../strategy/variants.js";
 import { resetLiveClobClient } from "./liveClob.js";
 import {
@@ -138,6 +140,8 @@ function buildVariantConfigHash(variant) {
       paperExitSlippageBps: variant?.paperExitSlippageBps ?? null,
       paperSpreadPenaltyFactor: variant?.paperSpreadPenaltyFactor ?? null,
       paperTakerFeeRate: variant?.paperTakerFeeRate ?? null,
+      exitShadowEnabled: variant?.exitShadowEnabled ?? null,
+      exitShadowIntervalSeconds: variant?.exitShadowIntervalSeconds ?? null,
       maxOracleLagMs: variant?.maxOracleLagMs ?? null,
       maxBinanceLagMs: variant?.maxBinanceLagMs ?? null,
       maxSnapshotAgeMs: variant?.maxSnapshotAgeMs ?? null,
@@ -773,6 +777,70 @@ async function recordPaperExitOutcome(client, {
   });
 }
 
+function buildExitShadowSnapshotBestEffort({
+  state,
+  variant,
+  strategyKey,
+  marketSlug,
+  settlementLeftMin,
+  bidPrice,
+  executableBidPrice,
+  poly,
+  paperExecution
+}) {
+  if (!variant?.exitShadowEnabled || !state?.active) return null;
+  try {
+    const sizing = computeFullExitSizing(state);
+    const selectedBook = state.side === "UP" ? poly?.orderbook?.up : poly?.orderbook?.down;
+    const bidDepthShares = toFiniteNumber(selectedBook?.bidLiquidity);
+    const hasLiquidity = hasEnoughBookLiquidity({
+      side: state.side,
+      poly,
+      requiredShares: sizing.exitShares,
+      liquiditySide: "bid"
+    });
+    const realizedIfExit =
+      executableBidPrice != null && executableBidPrice > 0 && sizing.exitShares != null
+        ? computeRealizedExitPnl({
+            entryPrice: state.entryPrice,
+            exitPrice: executableBidPrice,
+            notionalUsd: sizing.exitNotionalUsd,
+            shares: sizing.exitShares,
+            takerFeeRate: paperExecution.takerFeeRate
+          })
+        : null;
+    const nextLevel = state.takeProfitLevels?.[state.nextLevelIndex];
+    const takeProfitDue =
+      hasLiquidity && bidPrice != null && nextLevel?.price != null && bidPrice >= nextLevel.price;
+    const trailingStopDue = hasLiquidity && isTrailingStopTriggered(state, bidPrice);
+    return buildExitShadowSnapshot({
+      state,
+      strategyKey,
+      marketSlug,
+      settlementLeftMin,
+      bidPrice,
+      executableBidPrice,
+      bidDepthShares,
+      hasLiquidity,
+      higherPriorityExitDue: takeProfitDue || trailingStopDue,
+      realizedIfExit,
+      intervalSeconds: variant.exitShadowIntervalSeconds,
+      gitCommit: runtimeGitCommit,
+      configHash: buildVariantConfigHash(variant)
+    });
+  } catch (error) {
+    console.warn(`[exit-shadow] snapshot build skipped after failure: ${error?.message || error}`);
+    return null;
+  }
+}
+
+function enqueueExitShadowSnapshotBestEffort(databaseUrl, snapshot) {
+  if (!snapshot) return;
+  if (!enqueueExitShadowSnapshot(databaseUrl, snapshot)) {
+    console.warn("[exit-shadow] snapshot dropped before async persistence");
+  }
+}
+
 function formatRemainingPosition(state) {
   const remainingShares = toFiniteNumber(state?.sizeShares);
   const initialShares = toFiniteNumber(state?.initialSizeShares);
@@ -1382,6 +1450,17 @@ export async function runPaperStrategyTick({
               Number.isFinite(Number(settlementLeftMin)) &&
               Number(settlementLeftMin) <= forceExitMinutesLeft;
             updateTrailingHigh(paperTakeProfitState, bidPrice);
+            const exitShadowSnapshot = buildExitShadowSnapshotBestEffort({
+              state: paperTakeProfitState,
+              variant,
+              strategyKey: key,
+              marketSlug,
+              settlementLeftMin,
+              bidPrice,
+              executableBidPrice,
+              poly,
+              paperExecution
+            });
             let handledPaperExit = false;
             const paperLevelMessages = [];
 
@@ -1636,6 +1715,7 @@ export async function runPaperStrategyTick({
                 }
               }
             }
+            enqueueExitShadowSnapshotBestEffort(s.databaseUrl, exitShadowSnapshot);
           }
         }
 

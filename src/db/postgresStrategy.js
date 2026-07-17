@@ -99,6 +99,7 @@ export async function ensureStrategySchema(client) {
       ON strategy_paper_outcomes (market_slug);
     CREATE INDEX IF NOT EXISTS idx_strategy_paper_outcomes_created
       ON strategy_paper_outcomes (created_at DESC);
+
     CREATE TABLE IF NOT EXISTS strategy_live_orders (
       id BIGSERIAL PRIMARY KEY,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -210,6 +211,50 @@ export async function ensureStrategySchema(client) {
       ON strategy_paper_signals(strategy_key, market_slug);
     CREATE UNIQUE INDEX IF NOT EXISTS uq_strategy_paper_outcomes_entry_sequence
       ON strategy_paper_outcomes(entry_id, exit_sequence);
+  `);
+}
+
+export async function ensureExitShadowSchema(client) {
+  await client.query(`
+    CREATE TABLE IF NOT EXISTS strategy_exit_shadow_snapshots (
+      id BIGSERIAL PRIMARY KEY,
+      observed_at TIMESTAMPTZ NOT NULL,
+      recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      entry_id BIGINT NOT NULL REFERENCES strategy_paper_signals(id) ON DELETE RESTRICT,
+      experiment_key TEXT NOT NULL,
+      strategy_key TEXT NOT NULL,
+      market_slug TEXT NOT NULL,
+      snapshot_bucket BIGINT NOT NULL,
+      interval_seconds INTEGER NOT NULL CHECK (interval_seconds >= 5),
+      side TEXT CHECK (side IS NULL OR side IN ('UP', 'DOWN')),
+      seconds_left NUMERIC CHECK (seconds_left IS NULL OR seconds_left >= 0),
+      bid_price NUMERIC CHECK (bid_price IS NULL OR (bid_price >= 0 AND bid_price <= 1)),
+      executable_bid_price NUMERIC CHECK (executable_bid_price IS NULL OR (executable_bid_price >= 0 AND executable_bid_price <= 1)),
+      bid_depth_shares NUMERIC CHECK (bid_depth_shares IS NULL OR bid_depth_shares >= 0),
+      execution_model_version TEXT NOT NULL,
+      initial_notional_usd NUMERIC NOT NULL CHECK (initial_notional_usd > 0),
+      remaining_shares NUMERIC NOT NULL CHECK (remaining_shares > 0),
+      remaining_notional_usd NUMERIC NOT NULL CHECK (remaining_notional_usd > 0),
+      next_level_index INTEGER NOT NULL DEFAULT 0 CHECK (next_level_index >= 0),
+      next_target_price NUMERIC CHECK (next_target_price IS NULL OR (next_target_price >= 0 AND next_target_price <= 1)),
+      higher_priority_exit_due BOOLEAN NOT NULL DEFAULT false,
+      highest_bid_seen NUMERIC CHECK (highest_bid_seen IS NULL OR (highest_bid_seen >= 0 AND highest_bid_seen <= 1)),
+      has_bid_liquidity BOOLEAN NOT NULL DEFAULT false,
+      gross_pnl_if_exit_usd NUMERIC,
+      entry_fee_if_exit_usd NUMERIC,
+      exit_fee_if_exit_usd NUMERIC,
+      total_fee_if_exit_usd NUMERIC,
+      net_pnl_if_exit_usd NUMERIC,
+      prior_realized_pnl_usd NUMERIC NOT NULL DEFAULT 0,
+      total_net_pnl_if_exit_usd NUMERIC,
+      git_commit TEXT,
+      config_hash TEXT,
+      UNIQUE(entry_id, experiment_key, snapshot_bucket)
+    );
+    CREATE INDEX IF NOT EXISTS idx_exit_shadow_entry_observed
+      ON strategy_exit_shadow_snapshots (entry_id, observed_at);
+    CREATE INDEX IF NOT EXISTS idx_exit_shadow_strategy_observed
+      ON strategy_exit_shadow_snapshots (experiment_key, strategy_key, observed_at DESC);
   `);
 }
 
@@ -809,6 +854,68 @@ export async function insertPaperOutcome(client, row) {
     return { inserted: true, id: res.rows[0].id };
   }
   return { inserted: false };
+}
+
+export async function insertExitShadowSnapshot(client, row) {
+  const res = await client.query(
+    `WITH prior AS (
+       SELECT COALESCE(SUM(pnl_simulated_usd), 0)::numeric AS realized_pnl
+       FROM strategy_paper_outcomes
+       WHERE entry_id = $1
+         AND created_at <= $5::timestamptz
+     )
+     INSERT INTO strategy_exit_shadow_snapshots (
+       entry_id, experiment_key, strategy_key, market_slug, observed_at, snapshot_bucket, interval_seconds,
+       side, seconds_left, bid_price, executable_bid_price, bid_depth_shares,
+       execution_model_version, initial_notional_usd,
+       remaining_shares, remaining_notional_usd, next_level_index, next_target_price,
+       higher_priority_exit_due, highest_bid_seen, has_bid_liquidity, gross_pnl_if_exit_usd,
+       entry_fee_if_exit_usd, exit_fee_if_exit_usd,
+       total_fee_if_exit_usd, net_pnl_if_exit_usd, prior_realized_pnl_usd,
+       total_net_pnl_if_exit_usd, git_commit, config_hash
+     )
+     SELECT
+       $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,
+       prior.realized_pnl,
+       CASE WHEN $26::numeric IS NULL THEN NULL ELSE prior.realized_pnl + $26::numeric END,
+       $27,$28
+     FROM prior
+     ON CONFLICT (entry_id, experiment_key, snapshot_bucket) DO NOTHING
+     RETURNING id`,
+    [
+      row.entry_id,
+      row.experiment_key,
+      row.strategy_key ?? "default",
+      row.market_slug,
+      row.observed_at,
+      row.snapshot_bucket,
+      row.interval_seconds,
+      row.side ?? null,
+      row.seconds_left ?? null,
+      row.bid_price ?? null,
+      row.executable_bid_price ?? null,
+      row.bid_depth_shares ?? null,
+      row.execution_model_version,
+      row.initial_notional_usd,
+      row.remaining_shares,
+      row.remaining_notional_usd,
+      row.next_level_index ?? 0,
+      row.next_target_price ?? null,
+      row.higher_priority_exit_due ?? false,
+      row.highest_bid_seen ?? null,
+      row.has_bid_liquidity ?? false,
+      row.gross_pnl_if_exit_usd ?? null,
+      row.entry_fee_if_exit_usd ?? null,
+      row.exit_fee_if_exit_usd ?? null,
+      row.total_fee_if_exit_usd ?? null,
+      row.net_pnl_if_exit_usd ?? null,
+      row.git_commit ?? "unknown",
+      row.config_hash ?? null
+    ]
+  );
+  return res.rowCount > 0 && res.rows[0]?.id != null
+    ? { inserted: true, id: res.rows[0].id }
+    : { inserted: false };
 }
 
 export async function getStrategyPerformanceReport(client) {

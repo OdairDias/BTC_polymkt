@@ -80,6 +80,46 @@ CREATE INDEX IF NOT EXISTS idx_strategy_paper_outcomes_slug
 CREATE INDEX IF NOT EXISTS idx_strategy_paper_outcomes_created
   ON strategy_paper_outcomes (created_at DESC);
 
+CREATE TABLE IF NOT EXISTS strategy_exit_shadow_snapshots (
+  id BIGSERIAL PRIMARY KEY,
+  observed_at TIMESTAMPTZ NOT NULL,
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  entry_id BIGINT NOT NULL REFERENCES strategy_paper_signals(id) ON DELETE RESTRICT,
+  experiment_key TEXT NOT NULL,
+  strategy_key TEXT NOT NULL,
+  market_slug TEXT NOT NULL,
+  snapshot_bucket BIGINT NOT NULL,
+  interval_seconds INTEGER NOT NULL CHECK (interval_seconds >= 5),
+  side TEXT CHECK (side IS NULL OR side IN ('UP', 'DOWN')),
+  seconds_left NUMERIC CHECK (seconds_left IS NULL OR seconds_left >= 0),
+  bid_price NUMERIC CHECK (bid_price IS NULL OR (bid_price >= 0 AND bid_price <= 1)),
+  executable_bid_price NUMERIC CHECK (executable_bid_price IS NULL OR (executable_bid_price >= 0 AND executable_bid_price <= 1)),
+  bid_depth_shares NUMERIC CHECK (bid_depth_shares IS NULL OR bid_depth_shares >= 0),
+  execution_model_version TEXT NOT NULL,
+  initial_notional_usd NUMERIC NOT NULL CHECK (initial_notional_usd > 0),
+  remaining_shares NUMERIC NOT NULL CHECK (remaining_shares > 0),
+  remaining_notional_usd NUMERIC NOT NULL CHECK (remaining_notional_usd > 0),
+  next_level_index INTEGER NOT NULL DEFAULT 0 CHECK (next_level_index >= 0),
+  next_target_price NUMERIC CHECK (next_target_price IS NULL OR (next_target_price >= 0 AND next_target_price <= 1)),
+  higher_priority_exit_due BOOLEAN NOT NULL DEFAULT false,
+  highest_bid_seen NUMERIC CHECK (highest_bid_seen IS NULL OR (highest_bid_seen >= 0 AND highest_bid_seen <= 1)),
+  has_bid_liquidity BOOLEAN NOT NULL DEFAULT false,
+  gross_pnl_if_exit_usd NUMERIC,
+  entry_fee_if_exit_usd NUMERIC,
+  exit_fee_if_exit_usd NUMERIC,
+  total_fee_if_exit_usd NUMERIC,
+  net_pnl_if_exit_usd NUMERIC,
+  prior_realized_pnl_usd NUMERIC NOT NULL DEFAULT 0,
+  total_net_pnl_if_exit_usd NUMERIC,
+  git_commit TEXT,
+  config_hash TEXT,
+  UNIQUE(entry_id, experiment_key, snapshot_bucket)
+);
+CREATE INDEX IF NOT EXISTS idx_exit_shadow_entry_observed
+  ON strategy_exit_shadow_snapshots (entry_id, observed_at);
+CREATE INDEX IF NOT EXISTS idx_exit_shadow_strategy_observed
+  ON strategy_exit_shadow_snapshots (experiment_key, strategy_key, observed_at DESC);
+
 ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_winner TEXT;
 ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_resolution_status TEXT;
 ALTER TABLE strategy_paper_outcomes ADD COLUMN IF NOT EXISTS official_resolution_source TEXT;

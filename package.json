@@ -13,6 +13,8 @@
     "cron:eval": "node scripts/cron-strategy-eval-function.mjs",
     "report:strategy": "node scripts/report-strategy.mjs",
     "verify:h1": "node scripts/verify-h1-cohort.mjs",
+    "migrate:h1-exit-shadow": "node scripts/migrate-h1-exit-shadow.mjs",
+    "report:h1-exit-shadow": "node scripts/report-h1-exit-shadow.mjs",
     "walkforward:strategy": "node scripts/walkforward-strategy.mjs",
     "train:model": "node scripts/train-probability-model.mjs"
   },

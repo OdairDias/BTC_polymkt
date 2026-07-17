@@ -214,7 +214,9 @@ if (cheap1hLegacy) {
     paperEntrySlippageBps: 25,
     paperExitSlippageBps: 35,
     paperSpreadPenaltyFactor: 0.20,
-    paperTakerFeeRate: 0.07
+    paperTakerFeeRate: 0.07,
+    exitShadowEnabled: true,
+    exitShadowIntervalSeconds: 15
   });
 }
 
