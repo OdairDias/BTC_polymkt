@@ -65,7 +65,11 @@ export async function runPaperOutcomeTick() {
       const marketSlug = String(entry.market_slug ?? "");
       if (!marketSlug) continue;
 
-      const variant = s.variants.find((candidate) => candidate.key === strategyKey);
+      const variant =
+        s.variants.find((candidate) => candidate.key === strategyKey) ??
+        (strategyKey.endsWith("_poststop_observer")
+          ? s.variants.find((candidate) => candidate.key === strategyKey.replace(/_poststop_observer$/, ""))
+          : null);
       const takerFeeRate = Math.max(0, Number(variant?.paperTakerFeeRate ?? s.paperTakerFeeRate) || 0);
       const chosen = entry.chosen_side;
       const remainingNotionalUsd = Number(entry.remaining_notional_usd ?? entry.notional_usd ?? 0);

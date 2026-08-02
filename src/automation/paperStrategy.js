@@ -170,6 +170,13 @@ function buildVariantConfigHash(variant) {
   });
 }
 
+export function shouldCapturePostStopObserver({ riskResultCode, side, entryPrice, simulatedShares }) {
+  return riskResultCode === "SKIP_RISK_DAILY_LOSS" &&
+    (side === "UP" || side === "DOWN") &&
+    Number.isFinite(Number(entryPrice)) && Number(entryPrice) > 0 &&
+    Number.isFinite(Number(simulatedShares)) && Number(simulatedShares) > 0;
+}
+
 function buildEntryAttributionContext({
   variant,
   effectiveDecision,
@@ -2280,22 +2287,6 @@ export async function runPaperStrategyTick({
         }
       }
 
-      if (variant.riskGuardsEnabled && (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN")) {
-        const risk = await evaluateRiskStatsGuard({
-          pgClient: client,
-          strategyKey: key,
-          maxConsecutiveLosses: variant.maxConsecutiveLosses,
-          rollingLossHours: variant.rollingLossHours,
-          maxRollingLossUsd: variant.maxRollingLossUsd,
-          maxDailyLossUsd: variant.maxDailyLossUsd,
-          riskDayTimezone: variant.riskDayTimezone
-        });
-        if (!risk.allowed) {
-          effectiveDecision = { ...effectiveDecision, side: null, result: risk.resultCode };
-          localLiveLine = `${ANSI_GRAY}${risk.line}${ANSI_RESET}`;
-        }
-      }
-
       if (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN") {
         sizingDetails = chooseStrategyNotional({
           variantNotionalUsd: variant.notionalUsd,
@@ -2329,6 +2320,73 @@ export async function runPaperStrategyTick({
           effectiveDecision = { ...effectiveDecision, side: null, result: "SKIP_NO_LIQUIDITY" };
           simulatedShares = null;
           entryPrice = null;
+        }
+      }
+
+      if (variant.riskGuardsEnabled && (effectiveDecision.side === "UP" || effectiveDecision.side === "DOWN")) {
+        const risk = await evaluateRiskStatsGuard({
+          pgClient: client,
+          strategyKey: key,
+          maxConsecutiveLosses: variant.maxConsecutiveLosses,
+          rollingLossHours: variant.rollingLossHours,
+          maxRollingLossUsd: variant.maxRollingLossUsd,
+          maxDailyLossUsd: variant.maxDailyLossUsd,
+          riskDayTimezone: variant.riskDayTimezone
+        });
+        if (!risk.allowed) {
+          if (shouldCapturePostStopObserver({
+            riskResultCode: risk.resultCode,
+            side: effectiveDecision.side,
+            entryPrice,
+            simulatedShares
+          })) {
+            const endDate = poly.market.endDate ? new Date(poly.market.endDate) : null;
+            const marketEndAt = endDate && !Number.isNaN(endDate.getTime()) ? endDate.toISOString() : null;
+            await ensurePaperSignal(client, {
+              strategy_key: `${key}_poststop_observer`,
+              market_slug: marketSlug,
+              condition_id: poly.market.conditionId != null ? String(poly.market.conditionId) : null,
+              market_end_at: marketEndAt,
+              minutes_left: settlementLeftMin,
+              up_mid: upMid, down_mid: downMid, up_buy: upBuy, down_buy: downBuy,
+              up_best_bid: upBook.bestBid ?? null, up_best_ask: upBook.bestAsk ?? null,
+              down_best_bid: downBook.bestBid ?? null, down_best_ask: downBook.bestAsk ?? null,
+              result_code: "OBSERVED_AFTER_DAILY_STOP",
+              chosen_side: effectiveDecision.side,
+              notional_usd: activeNotionalUsd,
+              entry_price: entryPrice,
+              simulated_shares: simulatedShares,
+              dry_run: true,
+              oracle_price: oraclePrice ?? null,
+              binance_spot_price: binanceSpotPrice ?? null,
+              price_to_beat: priceToBeat ?? null,
+              ptb_delta_usd: ptbDelta ?? null,
+              model_prob_up: modelUp ?? null,
+              market_prob_up: marketUp ?? null,
+              edge_up: Number.isFinite(Number(modelUp)) && Number.isFinite(Number(marketUp)) ? Number(modelUp) - Number(marketUp) : null,
+              vol_atr_usd: volAtrUsd ?? null,
+              selected_model_prob: effectiveDecision.selectedModelProb ?? null,
+              selected_market_prob: effectiveDecision.selectedMarketProb ?? null,
+              selected_edge: effectiveDecision.selectedEdge ?? null,
+              selected_base_edge: effectiveDecision.selectedBaseEdge ?? null,
+              book_imbalance: effectiveDecision.selectedBookImbalance ?? null,
+              selected_spread: effectiveDecision.selectedSpread ?? null,
+              entry_reason_code: "SKIP_RISK_DAILY_LOSS",
+              entry_context_json: {
+                observation_only: true,
+                observer_version: "poststop_settlement_observer_v1",
+                baseline_strategy_key: key,
+                risk_daily_pnl_usd: risk.dailyPnlUsd ?? null,
+                risk_daily_limit_usd: variant.maxDailyLossUsd ?? null,
+                risk_day_timezone: variant.riskDayTimezone ?? null,
+                execution_semantics: "EXECUTABLE_FILL_SIMULATED_SETTLEMENT_ONLY"
+              },
+              config_hash: buildVariantConfigHash(variant),
+              git_commit: runtimeGitCommit
+            });
+          }
+          effectiveDecision = { ...effectiveDecision, side: null, result: risk.resultCode };
+          localLiveLine = `${ANSI_GRAY}${risk.line}${ANSI_RESET}`;
         }
       }
 

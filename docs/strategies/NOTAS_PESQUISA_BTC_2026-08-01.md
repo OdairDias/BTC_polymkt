@@ -117,7 +117,32 @@ Assim, não existe contrafactual auditável para afirmar que operações posteri
    - Segmentar por lado, faixa de entrada, edge, probabilidade, spread, book imbalance, minutos restantes, regime e motivo de saída.
    - Priorizar cortes/quarentenas de subconjuntos comprovadamente ruins, não aumentar frequência de toda a estratégia.
 
-## 5. Critério de avanço
+## 5. Implementação prospectiva aprovada — observer pós-stop
+
+Implementado em `2026-08-01` como experimento **paper-only**:
+
+```txt
+strategy_key: cheap_1h_exec_v2_poststop_observer
+origem: somente candidatos bloqueados por SKIP_RISK_DAILY_LOSS
+momento: após preço executável, sizing e profundidade de ask
+entrada: mesma best ask/slippage/fee simulados da baseline
+saída: settlement oficial Gamma; não replica TP em memória
+execução live: inexistente; não é liveStrategyKey e não chama o adapter CLOB
+persistência: uma observação por strategy_key + market_slug
+```
+
+O observer não remove nem amplia o stop de US$2 da baseline. Seu resultado é classificado como:
+
+```txt
+EXECUTABLE_FILL_SIMULATED
+SETTLEMENT_ONLY
+OBSERVATION_ONLY
+```
+
+O objetivo é produzir o contrafactual faltante: medir se candidatos posteriores ao stop diário teriam melhorado ou piorado o resultado sob preço executável e fee modelados. Não é evidência de fill real, escalabilidade ou autorização live.
+
+Critério de leitura: comparar baseline e observer por data/regime/lado/edge/preço, após uma quantidade prospectiva suficiente de outcomes oficiais. Não alterar thresholds ou risco com base em uma sequência curta.
+
 
 Nenhuma mudança de sizing, stop diário ou live deve ser promovida antes de uma coorte prospectiva com:
 

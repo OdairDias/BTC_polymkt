@@ -8,6 +8,7 @@ import {
   resolvePaperBuyReferencePrice
 } from "../src/strategy/executionModel.js";
 import { formatOfficialOutcomeLine } from "../src/automation/paperOutcome.js";
+import { shouldCapturePostStopObserver } from "../src/automation/paperStrategy.js";
 import { insertExitShadowSnapshot } from "../src/db/postgresStrategy.js";
 import { computeRealizedExitPnl, computeSimulatedPnl } from "../src/strategy/outcomeInfer.js";
 import {
@@ -108,6 +109,21 @@ test("official outcome formatting uses the computed accounting PnL", () => {
   });
   assert.match(loser, /entrada errou/);
   assert.match(loser, /\$-0\.71/);
+});
+
+test("post-stop observer captures only an executable daily-loss-blocked candidate", () => {
+  assert.equal(shouldCapturePostStopObserver({
+    riskResultCode: "SKIP_RISK_DAILY_LOSS", side: "UP", entryPrice: 0.31, simulatedShares: 3.2
+  }), true);
+  assert.equal(shouldCapturePostStopObserver({
+    riskResultCode: "SKIP_RISK_DAILY_LOSS", side: "UP", entryPrice: null, simulatedShares: 3.2
+  }), false);
+  assert.equal(shouldCapturePostStopObserver({
+    riskResultCode: "SKIP_RISK_CONSECUTIVE_LOSSES", side: "UP", entryPrice: 0.31, simulatedShares: 3.2
+  }), false);
+  assert.equal(shouldCapturePostStopObserver({
+    riskResultCode: "SKIP_RISK_DAILY_LOSS", side: null, entryPrice: 0.31, simulatedShares: 3.2
+  }), false);
 });
 
 test("exit shadow snapshot is read-only and keeps executable accounting", () => {
