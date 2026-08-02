@@ -42,6 +42,7 @@ Arquivos:
 - [aggr_35s.md](/Users/Odair/Desktop/Cursor/projeto_PLMK_BTC/PolymarketBTC15mAssistant/docs/strategies/aggr_35s.md)
 - [cheap_1h_tp45.md](/Users/Odair/Desktop/Cursor/projeto_PLMK_BTC/PolymarketBTC15mAssistant/docs/strategies/cheap_1h_tp45.md)
 - [cheap_15m_tp35.md](/Users/Odair/Desktop/Cursor/projeto_PLMK_BTC/PolymarketBTC15mAssistant/docs/strategies/cheap_15m_tp35.md)
+- [NOTAS_PESQUISA_BTC_2026-08-01.md](NOTAS_PESQUISA_BTC_2026-08-01.md) — vídeos analisados, Binance × oráculo e decisão sobre stop diário.
 
 ## Modos de decisao (decisionMode)
 
